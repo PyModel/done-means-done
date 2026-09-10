@@ -1,6 +1,6 @@
 # Validation report
 
-Release: **Done Means Done 0.4.0**, prepared September 10, 2026. The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
+Release: **Done Means Done 0.4.1**, prepared September 10, 2026. The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
 
 ## Executed verification
 
@@ -10,7 +10,7 @@ Release: **Done Means Done 0.4.0**, prepared September 10, 2026. The source repo
 | `python3 -B examples/local-demo.py` | Actual subprocess CLI workflow: unapproved execution rejected; intentional red baseline; root-cause repair; green verification; finding closure; final review/gate/report; same-size preserved-mtime source mutation rejected; final repair/reverification; a solely attested requirement refused, then completed under recorded operator authority with the acceptance basis disclosed in the report. | [Local demonstration transcript](local-demo.log) |
 | `python3 -B tests/validate_package.py` | Python syntax parsed using the Python 3.10 grammar; required files, release identity, local Markdown links, code fences, skill size, real files/no symlinks and no bytecode-cache artifacts checked. | [Static package transcript](package-validation.log) |
 | YAML frontmatter parsed with PyYAML in the build environment | Correct single skill name, standard fields and version. PyYAML is not a runtime dependency. | [Metadata result](frontmatter-validation.log) |
-| `python3 -B bin/dmd --version` and subcommand help | Version 0.4.0; every documented command entrypoint accepts its help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
+| `python3 -B bin/dmd --version` and subcommand help | Version 0.4.1; every documented command entrypoint accepts its help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
 | Final archive and SHA-256 manifest | ZIP CRC/member checks and every payload checksum verified; one `done-means-done/` root. No archived files from other skill packages, no symlinks or bytecode caches. | Distribution manifest `SHA256SUMS`; archive validation emitted during packaging |
 
 The unit suite includes **synthetic predicate fixtures** and **actual CLI/filesystem/process/hook-contract/installer/migration tests**. Synthetic records test the acceptance predicate, not independent truth of software behavior. Hook payload fixtures test documented control responses, not a live host session.
@@ -41,3 +41,12 @@ Executed on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7), the platform 0.
 - Whole-project hashing, private-state size limits and advisory locks have not been benchmarked for a large agent fleet. No efficiency, universal bug-freedom, or uninterrupted-execution guarantee is claimed.
 
 No remote repository was modified, no user host configuration was installed, no credentials were requested, and no background work was scheduled in preparing this artifact. The package is ready for local evaluation and opt-in installation using the adoption guide; live-host acceptance remains a separate validation step.
+
+## 0.4.1 resilience verification
+
+| Check | Result |
+|---|---|
+| `tests/test_resilience.py` (10 tests): contended lock acquired after holder release, zero-wait immediate failure naming `DMD_LOCK_WAIT`, deadline expiry, env validation, CLI mutation waiting out a concurrent holder, silent `PostToolUse` under contention, recorded `PostToolUse` when free, sibling-worktree hint via a real `git worktree add`, finished siblings not suggested, plain message without siblings | All pass; full suite 188 tests, [transcript](tests-final.log) |
+| Trigger | A field report from another repository: an agent in a linked worktree saw "dmd has no active task in this worktree" with no pointer to the task in the main checkout, and hook/CLI overlap produced instant lock failures |
+
+Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).

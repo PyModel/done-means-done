@@ -125,6 +125,16 @@ test_unconfigured_migrated_check_not_accepted (test_model.ModelCase.test_unconfi
 test_unknown_external_outcome_blocks (test_model.ModelCase.test_unknown_external_outcome_blocks) ... ok
 test_unmatched_output_not_accepted (test_model.ModelCase.test_unmatched_output_not_accepted) ... ok
 test_unverified_work_blocks (test_model.ModelCase.test_unverified_work_blocks) ... ok
+test_post_tool_use_is_recorded_when_the_lock_is_free (test_resilience.HookContentionCase.test_post_tool_use_is_recorded_when_the_lock_is_free) ... ok
+test_post_tool_use_is_silent_when_the_task_lock_is_held (test_resilience.HookContentionCase.test_post_tool_use_is_silent_when_the_task_lock_is_held) ... ok
+test_cli_mutation_waits_out_a_concurrent_holder (test_resilience.LockRetryCase.test_cli_mutation_waits_out_a_concurrent_holder) ... ok
+test_contended_lock_is_acquired_once_the_holder_releases (test_resilience.LockRetryCase.test_contended_lock_is_acquired_once_the_holder_releases) ... ok
+test_environment_override_is_validated (test_resilience.LockRetryCase.test_environment_override_is_validated) ... ok
+test_wait_expires_after_the_configured_deadline (test_resilience.LockRetryCase.test_wait_expires_after_the_configured_deadline) ... ok
+test_zero_wait_fails_immediately_and_names_the_remedy (test_resilience.LockRetryCase.test_zero_wait_fails_immediately_and_names_the_remedy) ... ok
+test_finished_sibling_tasks_are_not_suggested (test_resilience.SiblingWorktreeCase.test_finished_sibling_tasks_are_not_suggested) ... ok
+test_no_active_task_names_the_sibling_worktree_task (test_resilience.SiblingWorktreeCase.test_no_active_task_names_the_sibling_worktree_task) ... ok
+test_plain_no_task_message_without_siblings (test_resilience.SiblingWorktreeCase.test_plain_no_task_message_without_siblings) ... ok
 test_actual_output_and_exit_capture (test_runtime.RunnerCase.test_actual_output_and_exit_capture) ... ok
 test_background_descendant_holding_pipes_times_out (test_runtime.RunnerCase.test_background_descendant_holding_pipes_times_out) ... ok
 test_cancellation_terminates_check (test_runtime.RunnerCase.test_cancellation_terminates_check) ... ok
@@ -179,7 +189,7 @@ test_watchdog_pauses_without_claiming_completion (test_runtime.RuntimeCase.test_
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 178 tests in 29.785s
+Ran 188 tests in 64.295s
 
 OK
-DMD_TESTS_PASS:178;skipped=0
+DMD_TESTS_PASS:188;skipped=0

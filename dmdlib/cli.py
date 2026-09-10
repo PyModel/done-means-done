@@ -53,10 +53,30 @@ def locate(cwd, task_id=None):
         raise DmdError("task belongs to another worktree")
     return directory
 
+def sibling_tasks(cwd):
+    """Unfinished tasks recorded for other worktrees of the same repository. State is keyed
+    by physical worktree, so a task started in the main checkout is invisible from a linked
+    worktree; naming it beats a bare 'no active task'."""
+    root, project, worktree = identity(cwd)
+    found = []
+    for pointer in sorted((state_root() / "v2" / project).glob("*/active.json")):
+        if pointer.parent.name == worktree:
+            continue
+        try:
+            t = load_task(pointer.parent / ident(read_json(pointer).get("task_id")))
+        except (DmdError, OSError):
+            continue
+        if t["state"] not in ("COMPLETE", "CANCELLED"):
+            found.append((t["task_id"], t["state"], t["root"]))
+    return found
+
 def need(args):
     directory = locate(args.cwd, args.task)
     if directory is None:
-        raise DmdError("no active task; invoke init with the authorized assignment")
+        hint = "; ".join(f"{tid} is {state} in worktree {root} (run dmd --cwd {root} ... there, or init here)"
+                         for tid, state, root in sibling_tasks(args.cwd))
+        raise DmdError("no active task in this worktree; invoke init with the authorized assignment"
+                       + (". Related: " + hint if hint else ""))
     return directory
 
 @contextlib.contextmanager

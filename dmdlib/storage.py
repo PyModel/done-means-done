@@ -5,14 +5,20 @@ import fcntl
 import hashlib
 import json
 import os
+import random
 import re
 import stat
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 MAX_STATE_BYTES = 16 * 1024 * 1024
+# Default bounded wait for a contended state lock. Hooks and CLI commands on the same
+# task overlap routinely (a PostToolUse event firing during `dmd run`); a short wait
+# absorbs that without turning the lock into an indefinite block.
+LOCK_WAIT_SECONDS = 5.0
 # task.json carries a bounded tail; events.jsonl is the complete appended history.
 EVENT_TAIL = 200
 
@@ -96,18 +102,47 @@ def read_json(path, limit=None):
     except (ValueError, UnicodeError) as exc:
         raise DmdError(f"invalid JSON: {path}") from exc
 
+def lock_wait():
+    raw = os.environ.get("DMD_LOCK_WAIT")
+    if raw is None:
+        return LOCK_WAIT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise DmdError("DMD_LOCK_WAIT must be a number of seconds") from exc
+    if not 0 <= value <= 600:
+        raise DmdError("DMD_LOCK_WAIT must be 0..600 seconds")
+    return value
+
+def acquire(fd, wait):
+    """Retry a non-blocking flock with capped exponential backoff and jitter until `wait`
+    seconds have elapsed. Non-blocking plus retry, rather than a blocking flock, keeps the
+    deadline exact and leaves no lock waiter to strand if the holder never returns."""
+    deadline = time.monotonic() + wait
+    delay = 0.02
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return attempts
+        except BlockingIOError as exc:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DmdError(f"another operation owns this lock; waited {wait:g}s over {attempts} attempt(s). "
+                               "Retry after it finishes, or raise DMD_LOCK_WAIT") from exc
+            time.sleep(min(remaining, delay * (0.5 + random.random())))
+            delay = min(delay * 2, 0.25)
+
 @contextlib.contextmanager
-def lock(directory, name=".lock"):
+def lock(directory, name=".lock", wait=None):
     private_dir(directory)
     path = directory / name
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         if os.fstat(fd).st_nlink != 1:
             raise DmdError("refusing linked lock file")
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise DmdError("another operation owns this lock; retry after it finishes") from exc
+        acquire(fd, lock_wait() if wait is None else wait)
         yield
     finally:
         os.close(fd)

@@ -49,11 +49,19 @@ def handle(args):
             bind_session(directory, session)
     if directory is None:
         return 0
+    if args.event in ("post-tool-use", "post-tool-failure"):
+        # Bookkeeping only. A contended lock (the agent is mid `dmd run`) must not surface
+        # as a hook failure to the host; the event is dropped, never the task state.
+        try:
+            with lock(directory, wait=1.0):
+                task = load_task(directory)
+                save(directory, task, "hook." + args.event, tool=safe_text(payload.get("tool_name", "unknown"), 80))
+        except DmdError as exc:
+            if "owns this lock" not in str(exc):
+                raise
+        return 0
     with lock(directory):
         task = load_task(directory)
-        if args.event in ("post-tool-use", "post-tool-failure"):
-            save(directory, task, "hook." + args.event, tool=safe_text(payload.get("tool_name", "unknown"), 80))
-            return 0
         if session not in task["sessions"]:
             task["sessions"].append(session)
         fp = task_fingerprint(task)

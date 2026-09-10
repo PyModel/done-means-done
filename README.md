@@ -4,7 +4,7 @@
 
 Agents stop early. They finish four items out of five, call a checkpoint a delivery, report a bug instead of fixing it, or mark a test green that never ran an assertion. This skill puts the obligations in a file on disk and refuses to call the work finished until the evidence says so.
 
-Version 0.4.0. The runtime is a single Python CLI, `dmd`, with no dependencies outside the standard library.
+Version 0.4.1. The runtime is a single Python CLI, `dmd`, with no dependencies outside the standard library.
 
 Start with [SKILL.md](SKILL.md) for the protocol the agent follows. [Adoption](references/adoption.md) covers installing, upgrading and rolling back. [Validation](evidence/VALIDATION.md) says what was actually run, and [remediations](evidence/REMEDIATIONS.md) lists the defects found and fixed along the way.
 
@@ -96,4 +96,4 @@ The hooks only work while the host process is alive. They do not restart anythin
 
 MIT, and the copyright stays with the PyModel contributors. See [LICENSE](LICENSE).
 
-The protocol and the runtime design come from [PyModel/done-means-done](https://github.com/PyModel/done-means-done), inspected at the commit pinned in [SOURCE.json](SOURCE.json). This is not a byte-identical checkout of that repository. The implementation was rebuilt from the inspected design, and 0.4.0 adds local fixes that were never sent upstream. [CHANGELOG.md](CHANGELOG.md) has the details.
+The protocol and the runtime design come from [PyModel/done-means-done](https://github.com/PyModel/done-means-done), inspected at the commit pinned in [SOURCE.json](SOURCE.json). This is not a byte-identical checkout of that repository. The implementation was rebuilt from the inspected design, and 0.4.x adds local fixes that were never sent upstream. [CHANGELOG.md](CHANGELOG.md) has the details.
