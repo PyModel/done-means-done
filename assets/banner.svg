@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="Done Means Done: a completion gate for coding agents">
+  <title>Done Means Done</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#12161c"/>
+      <stop offset="1" stop-color="#1b2129"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3fb950" stop-opacity="0"/>
+      <stop offset="0.12" stop-color="#3fb950"/>
+      <stop offset="0.62" stop-color="#3fb950"/>
+      <stop offset="1" stop-color="#3fb950" stop-opacity="0"/>
+    </linearGradient>
+    <style>
+      .mark { font: 700 66px ui-sans-serif, -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif; fill: #e9edf2; letter-spacing: -1.6px; }
+      .sub  { font: 400 21px ui-sans-serif, -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif; fill: #9aa6b2; }
+      .row  { font: 500 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .ok   { fill: #3fb950; }
+      .att  { fill: #d29922; }
+      .owed { fill: #6e7781; }
+      .lbl  { fill: #8b949e; font: 400 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="320" rx="14" fill="url(#bg)"/>
+  <g opacity="0.5">
+    <path d="M0 250 H1200" stroke="#2a313a" stroke-width="1"/>
+  </g>
+
+  <text class="mark" x="72" y="128">done means done</text>
+  <rect x="74" y="150" width="470" height="3" rx="1.5" fill="url(#rule)"/>
+  <text class="sub" x="72" y="196">A completion gate for coding agents. The ledger decides, not the model.</text>
+  <text class="lbl" x="72" y="288">python3 · stdlib only · macOS and Linux · MIT</text>
+
+  <g transform="translate(742 72)">
+    <rect x="0" y="0" width="386" height="176" rx="10" fill="#0d1117" stroke="#2a313a"/>
+
+    <circle cx="26" cy="34" r="6" class="ok"/>
+    <text class="row ok" x="46" y="40">R-01  executed</text>
+
+    <circle cx="26" cy="70" r="6" class="att"/>
+    <text class="row att" x="46" y="76">R-02  self-attested</text>
+
+    <circle cx="26" cy="106" r="6" class="owed"/>
+    <text class="row owed" x="46" y="112">R-03  still owed</text>
+
+    <path d="M14 136 H372" stroke="#2a313a" stroke-width="1"/>
+    <text class="row owed" x="46" y="162">gate</text>
+    <text class="row att" x="106" y="162">ACTIVE</text>
+  </g>
+</svg>

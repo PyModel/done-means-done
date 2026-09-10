@@ -1,0 +1,229 @@
+$ dmd init -m 'Deliver VALUE=42 and remediate the discovered incorrect value' --authority 'Local acceptance fixture explicitly authorizes its temporary project'
+T-6af9aae5bb664dac94feb67ba01fd98f
+$ dmd req add 'VALUE equals 42' --anchor 'Fixture original request'
+R-01
+$ dmd work add 'Fix value and verify the actual import' --req R-01 --owns subject.py
+W-01
+$ dmd check add --req R-01 --work W-01 --cmd '/opt/homebrew/opt/python@3.14/bin/python3.14 -B verify.py' --expect 'One real assertion verifies imported VALUE=42' --match VALUE_ACCEPTANCE_PASS:1 --input verify.py --regression --red-match EXPECTED_VALUE_42
+A-01
+$ dmd finding add 'VALUE is 41 rather than required 42' --location subject.py:1 --status confirmed --origin pre-existing
+F-01
+$ dmd coverage assert --note 'Original outcome and confirmed defect map to R-01, W-01, A-01 and F-01'
+coverage recorded; semantic completeness still requires source-request review
+$ dmd run A-01
+dmd: check has no current inspected approval: never approved. Re-inspect and run: dmd approve A-01 --note '<what you inspected>'
+$ dmd preview A-01
+{
+  "definition": {
+    "id": "A-01",
+    "req": "R-01",
+    "work": [
+      "W-01"
+    ],
+    "method": "command",
+    "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -B verify.py",
+    "cwd": "/private/tmp/dmd-demo-8s2nfq5z/project",
+    "expect": "One real assertion verifies imported VALUE=42",
+    "match": "VALUE_ACCEPTANCE_PASS:1",
+    "timeout": 300,
+    "max_output": 1048576,
+    "inputs": [
+      "/private/tmp/dmd-demo-8s2nfq5z/project/verify.py"
+    ],
+    "regression": true,
+    "red_match": "EXPECTED_VALUE_42",
+    "red_exit": 1,
+    "attested_because": null
+  },
+  "shell": "/bin/sh",
+  "path_fingerprint": "3a7994964442067abccf393a5e0acc14c7efede35ebcb5f28d00941f4acbeeb8",
+  "instruction": "Inspect the command and every called script. Approval is an operator-authorized action, not implied by a ledger."
+}
+$ dmd approve A-01 --note 'Fixture verifier was authored above and inspected; it performs one assertion with no external effects'
+A-01 approved for the exact displayed definition and environment
+$ dmd run A-01 --red
+{"check": "A-01", "result": "RED-OK", "exit": 1, "matched": true, "failure": null, "duration_s": 0.070461, "evidence": "/private/tmp/dmd-demo-8s2nfq5z/state/v2/6b092d52f6e7397dc67ae226/6b092d52f6e7397dc67ae226/T-6af9aae5bb664dac94feb67ba01fd98f/evidence/command-ff20015f22c440678e74e861b3c28995.txt"}
+$ dmd run A-01
+{"check": "A-01", "result": "PASS", "exit": 0, "matched": true, "failure": null, "duration_s": 0.053528, "evidence": "/private/tmp/dmd-demo-8s2nfq5z/state/v2/6b092d52f6e7397dc67ae226/6b092d52f6e7397dc67ae226/T-6af9aae5bb664dac94feb67ba01fd98f/evidence/command-78dfd3f9bea14fe186b88b7a366e9307.txt"}
+$ dmd work set --id W-01 --status verified
+W-01 verified
+$ dmd finding set --id F-01 --status fixed-verified --work W-01 --check A-01 --note 'Actual faulty baseline reproduced; root value repaired and regression verified'
+F-01 fixed-verified
+$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Final fixture contract and real assertion inspected' --evidence /private/tmp/dmd-demo-8s2nfq5z/review.txt
+final review recorded
+$ dmd gate
+{
+  "status": "COMPLETE",
+  "reasons": [],
+  "next": [],
+  "source": "2cbe818315f52568af38d8839d71946ccaeb44d6e90dd15d8a2e9d3a2b23f9cc",
+  "attestation": {
+    "executed": 1,
+    "self_attested": 0
+  }
+}
+$ dmd gate
+{
+  "status": "ACTIVE",
+  "reasons": [
+    "W-01: work/evidence not verified for current candidate",
+    "A-01: PASS or stale/missing evidence",
+    "F-01: remediation work not currently verified",
+    "review: final request/diff/integration review missing or stale"
+  ],
+  "next": [
+    {
+      "id": "W-01",
+      "action": "reverify stale evidence"
+    }
+  ],
+  "source": "060ad4760644fad1bbb5ef99151522eb88f5b9701e41463194d83e88759189c4",
+  "attestation": {
+    "executed": 0,
+    "self_attested": 0
+  }
+}
+$ dmd run A-01
+{"check": "A-01", "result": "FAIL", "exit": 1, "matched": false, "failure": null, "duration_s": 0.06545, "evidence": "/private/tmp/dmd-demo-8s2nfq5z/state/v2/6b092d52f6e7397dc67ae226/6b092d52f6e7397dc67ae226/T-6af9aae5bb664dac94feb67ba01fd98f/evidence/command-bde09605497349769e3363a10a4bb8ce.txt"}
+$ dmd run A-01
+{"check": "A-01", "result": "PASS", "exit": 0, "matched": true, "failure": null, "duration_s": 0.052019, "evidence": "/private/tmp/dmd-demo-8s2nfq5z/state/v2/6b092d52f6e7397dc67ae226/6b092d52f6e7397dc67ae226/T-6af9aae5bb664dac94feb67ba01fd98f/evidence/command-2a6253bf8b1e402b9c44cb9038a39583.txt"}
+$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Final fixture restored, retested and reviewed after freshness challenge' --evidence /private/tmp/dmd-demo-8s2nfq5z/review.txt
+final review recorded
+$ dmd gate
+{
+  "status": "COMPLETE",
+  "reasons": [],
+  "next": [],
+  "source": "2cbe818315f52568af38d8839d71946ccaeb44d6e90dd15d8a2e9d3a2b23f9cc",
+  "attestation": {
+    "executed": 1,
+    "self_attested": 0
+  }
+}
+$ dmd report --save
+# Done Means Done | T-6af9aae5bb664dac94feb67ba01fd98f | COMPLETE
+
+## Assignment
+Deliver VALUE=42 and remediate the discovered incorrect value
+
+## Acceptance basis
+- Accepted checks executed by dmd: 1
+- Accepted checks SELF-ATTESTED by the agent (no command was run): 0
+
+## Requirements
+- R-01 [active] VALUE equals 42 (source: Fixture original request)
+
+## Work
+- W-01 [verified] Fix value and verify the actual import -> R-01; dependencies: none
+
+## Checks
+- A-01 [ACCEPTED · EXECUTED] (command) One real assertion verifies imported VALUE=42
+  Evidence: /private/tmp/dmd-demo-8s2nfq5z/state/v2/6b092d52f6e7397dc67ae226/6b092d52f6e7397dc67ae226/T-6af9aae5bb664dac94feb67ba01fd98f/evidence/command-2a6253bf8b1e402b9c44cb9038a39583.txt
+
+## Findings (all severities and origins)
+- F-01 [fixed-verified; pre-existing] subject.py:1: VALUE is 41 rather than required 42; Actual faulty baseline reproduced; root value repaired and regression verified
+
+## Blockers and external outcomes
+
+## Review history
+- 2026-09-10T19:15:28.694863+00:00 [accepted] self review by deterministic local fixture: Final fixture contract and real assertion inspected
+- 2026-09-10T19:15:29.593978+00:00 [accepted] self review by deterministic local fixture: Final fixture restored, retested and reviewed after freshness challenge
+
+## Still owed
+
+## Next actions
+
+Review: self
+Source: 2cbe818315f52568af38d8839d71946ccaeb44d6e90dd15d8a2e9d3a2b23f9cc
+Evidence is local auditability, not tamper-proof attestation.
+$ dmd req add 'The rendered page looks correct to a person' --anchor 'Original request, outcome 2'
+R-02
+$ dmd work add 'Lay out and visually check the page' --req R-02
+W-02
+$ dmd check add --req R-02 --work W-02 --method browser --expect 'A person confirms the rendered layout at the declared viewport' --attested-because 'No command can assert how a rendered page looks to a person'
+A-02
+$ dmd check set --id A-02 --status PASS --note 'Observed at 1280x800; banner and totals as specified' --evidence /private/tmp/dmd-demo-8s2nfq5z/observation.txt
+
+$ dmd work set --id W-02 --status verified
+W-02 verified
+$ dmd coverage assert --note 'Both outcomes mapped; R-02 is observable only by a person'
+coverage recorded; semantic completeness still requires source-request review
+$ dmd gate
+{
+  "status": "ACTIVE",
+  "reasons": [
+    "R-02: every accepted check is self-attested; add an executed check or record operator authority with req attest-only",
+    "review: final request/diff/integration review missing or stale"
+  ],
+  "next": [
+    {
+      "id": "R-02",
+      "action": "add an executed acceptance check, or record operator authority via req attest-only"
+    }
+  ],
+  "source": "2cbe818315f52568af38d8839d71946ccaeb44d6e90dd15d8a2e9d3a2b23f9cc",
+  "attestation": {
+    "executed": 1,
+    "self_attested": 1
+  }
+}
+$ dmd req attest-only --id R-02 --authority 'Operator accepts a recorded human observation for this outcome'
+R-02 may be accepted on attestation alone under recorded operator authority
+$ dmd coverage assert --note 'Reconciled after recording attested-only authority'
+coverage recorded; semantic completeness still requires source-request review
+$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Both outcomes reconciled; R-02 rests on a recorded human observation' --evidence /private/tmp/dmd-demo-8s2nfq5z/review.txt
+final review recorded
+$ dmd gate
+{
+  "status": "COMPLETE",
+  "reasons": [],
+  "next": [],
+  "source": "2cbe818315f52568af38d8839d71946ccaeb44d6e90dd15d8a2e9d3a2b23f9cc",
+  "attestation": {
+    "executed": 1,
+    "self_attested": 1
+  }
+}
+$ dmd report --save
+# Done Means Done | T-6af9aae5bb664dac94feb67ba01fd98f | COMPLETE
+
+## Assignment
+Deliver VALUE=42 and remediate the discovered incorrect value
+
+## Acceptance basis
+- Accepted checks executed by dmd: 1
+- Accepted checks SELF-ATTESTED by the agent (no command was run): 1
+
+## Requirements
+- R-01 [active] VALUE equals 42 (source: Fixture original request)
+- R-02 [active] The rendered page looks correct to a person (source: Original request, outcome 2) — attested-only by operator authority: Operator accepts a recorded human observation for this outcome
+
+## Work
+- W-01 [verified] Fix value and verify the actual import -> R-01; dependencies: none
+- W-02 [verified] Lay out and visually check the page -> R-02; dependencies: none
+
+## Checks
+- A-01 [ACCEPTED · EXECUTED] (command) One real assertion verifies imported VALUE=42
+  Evidence: /private/tmp/dmd-demo-8s2nfq5z/state/v2/6b092d52f6e7397dc67ae226/6b092d52f6e7397dc67ae226/T-6af9aae5bb664dac94feb67ba01fd98f/evidence/command-2a6253bf8b1e402b9c44cb9038a39583.txt
+- A-02 [ACCEPTED · SELF-ATTESTED] (browser) A person confirms the rendered layout at the declared viewport
+  Attested because: No command can assert how a rendered page looks to a person
+  Evidence: /private/tmp/dmd-demo-8s2nfq5z/state/v2/6b092d52f6e7397dc67ae226/6b092d52f6e7397dc67ae226/T-6af9aae5bb664dac94feb67ba01fd98f/evidence/review-f227748cb51846daa683ac790884d088.txt
+
+## Findings (all severities and origins)
+- F-01 [fixed-verified; pre-existing] subject.py:1: VALUE is 41 rather than required 42; Actual faulty baseline reproduced; root value repaired and regression verified
+
+## Blockers and external outcomes
+
+## Review history
+- 2026-09-10T19:15:28.694863+00:00 [accepted] self review by deterministic local fixture: Final fixture contract and real assertion inspected
+- 2026-09-10T19:15:29.593978+00:00 [accepted] self review by deterministic local fixture: Final fixture restored, retested and reviewed after freshness challenge
+- 2026-09-10T19:15:31.126413+00:00 [accepted] self review by deterministic local fixture: Both outcomes reconciled; R-02 rests on a recorded human observation
+
+## Still owed
+
+## Next actions
+
+Review: self
+Source: 2cbe818315f52568af38d8839d71946ccaeb44d6e90dd15d8a2e9d3a2b23f9cc
+Evidence is local auditability, not tamper-proof attestation.
+DMD_DEMO_PASS:real-red-green-and-stale-rejection;attested-only-refused-then-authorized;temporary-fixtures-removed

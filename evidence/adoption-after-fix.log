@@ -1,0 +1,19 @@
+test_first_install_creates_valid_settings (test_adoption.AdoptionCase.test_first_install_creates_valid_settings) ... ok
+test_install_preserves_existing_settings_and_hooks (test_adoption.AdoptionCase.test_install_preserves_existing_settings_and_hooks) ... ok
+test_invalid_settings_shape_not_modified (test_adoption.AdoptionCase.test_invalid_settings_shape_not_modified) ... ok
+test_migration_discards_green_and_reopens_confirmed_findings (test_adoption.AdoptionCase.test_migration_discards_green_and_reopens_confirmed_findings) ... ok
+test_migration_invalid_graph_leaves_active_task_unchanged (test_adoption.AdoptionCase.test_migration_invalid_graph_leaves_active_task_unchanged) ... ok
+test_migration_preserves_cancelled_state (test_adoption.AdoptionCase.test_migration_preserves_cancelled_state) ... ok
+test_migration_recovers_unmapped_obligations (test_adoption.AdoptionCase.test_migration_recovers_unmapped_obligations) ... ok
+test_migration_refuses_unsupported_schema_without_task (test_adoption.AdoptionCase.test_migration_refuses_unsupported_schema_without_task) ... ok
+test_paths_with_spaces_are_shell_quoted (test_adoption.AdoptionCase.test_paths_with_spaces_are_shell_quoted) ... ok
+test_preview_creates_no_state_or_settings (test_adoption.AdoptionCase.test_preview_creates_no_state_or_settings) ... ok
+test_repeat_install_is_idempotent (test_adoption.AdoptionCase.test_repeat_install_is_idempotent) ... ok
+test_settings_symlink_parent_refused_even_in_preview (test_adoption.AdoptionCase.test_settings_symlink_parent_refused_even_in_preview) ... ok
+test_settings_symlink_refused (test_adoption.AdoptionCase.test_settings_symlink_refused) ... ok
+test_uninstall_removes_only_exact_managed_commands (test_adoption.AdoptionCase.test_uninstall_removes_only_exact_managed_commands) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 7.027s
+
+OK

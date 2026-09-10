@@ -1,0 +1,6 @@
+test_explicit_resume_resets_no_progress_watchdogs (test_runtime.RuntimeCase.test_explicit_resume_resets_no_progress_watchdogs) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.076s
+
+OK

@@ -1,0 +1,44 @@
+test_first_install_creates_valid_settings (test_adoption.AdoptionCase.test_first_install_creates_valid_settings) ... ok
+test_install_preserves_existing_settings_and_hooks (test_adoption.AdoptionCase.test_install_preserves_existing_settings_and_hooks) ... ok
+test_invalid_settings_shape_not_modified (test_adoption.AdoptionCase.test_invalid_settings_shape_not_modified) ... ok
+test_migration_discards_green_and_reopens_confirmed_findings (test_adoption.AdoptionCase.test_migration_discards_green_and_reopens_confirmed_findings) ... ok
+test_migration_invalid_graph_leaves_active_task_unchanged (test_adoption.AdoptionCase.test_migration_invalid_graph_leaves_active_task_unchanged) ... ERROR
+test_migration_preserves_cancelled_state (test_adoption.AdoptionCase.test_migration_preserves_cancelled_state) ... ok
+test_migration_recovers_unmapped_obligations (test_adoption.AdoptionCase.test_migration_recovers_unmapped_obligations) ... ok
+test_migration_refuses_unsupported_schema_without_task (test_adoption.AdoptionCase.test_migration_refuses_unsupported_schema_without_task) ... ok
+test_paths_with_spaces_are_shell_quoted (test_adoption.AdoptionCase.test_paths_with_spaces_are_shell_quoted) ... ok
+test_preview_creates_no_state_or_settings (test_adoption.AdoptionCase.test_preview_creates_no_state_or_settings) ... ok
+test_repeat_install_is_idempotent (test_adoption.AdoptionCase.test_repeat_install_is_idempotent) ... ok
+test_settings_symlink_parent_refused_even_in_preview (test_adoption.AdoptionCase.test_settings_symlink_parent_refused_even_in_preview) ... FAIL
+test_settings_symlink_refused (test_adoption.AdoptionCase.test_settings_symlink_refused) ... ok
+test_uninstall_removes_only_exact_managed_commands (test_adoption.AdoptionCase.test_uninstall_removes_only_exact_managed_commands) ... ok
+
+======================================================================
+ERROR: test_migration_invalid_graph_leaves_active_task_unchanged (test_adoption.AdoptionCase.test_migration_invalid_graph_leaves_active_task_unchanged)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/done-means-done/tests/test_adoption.py", line 75, in test_migration_invalid_graph_leaves_active_task_unchanged
+    self.assertEqual(locate(self.repo),directory); self.assertEqual((directory/'task.json').read_bytes(),before); self.assertEqual(source.read_bytes(),oldbytes)
+                     ~~~~~~^^^^^^^^^^^
+  File "/mnt/data/done-means-done/dmdlib/cli.py", line 48, in locate
+    t = load_task(directory)
+  File "/mnt/data/done-means-done/dmdlib/cli.py", line 36, in load_task
+    raise DmdError("; ".join(errors))
+dmdlib.storage.DmdError: W-01: missing dependency
+
+======================================================================
+FAIL: test_settings_symlink_parent_refused_even_in_preview (test_adoption.AdoptionCase.test_settings_symlink_parent_refused_even_in_preview)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/done-means-done/tests/test_adoption.py", line 70, in test_settings_symlink_parent_refused_even_in_preview
+    self.install(code=2); self.assertEqual((real/'settings.json').read_text(),'{}'); self.assertFalse(self.state.exists())
+    ~~~~~~~~~~~~^^^^^^^^
+  File "/mnt/data/done-means-done/tests/test_adoption.py", line 31, in install
+    self.assertEqual(p.returncode, code, (p.stdout, p.stderr))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2 : ('{\n  "preview": true,\n  "settings": "/tmp/tmp5vamc65r/Claude settings/settings.json",\n  "remove": false,\n  "result": {\n    "hooks": {\n      "SessionStart": [\n        {\n          "hooks": [\n            {\n              "type": "command",\n              "command": "env \'DMD_STATE=/tmp/tmp5vamc65r/private state\' /opt/pyvenv/bin/python3 /mnt/data/done-means-done/bin/dmd hook session-start",\n              "timeout": 30\n            }\n          ]\n        }\n      ],\n      "Stop": [\n        {\n          "hooks": [\n            {\n              "type": "command",\n              "command": "env \'DMD_STATE=/tmp/tmp5vamc65r/private state\' /opt/pyvenv/bin/python3 /mnt/data/done-means-done/bin/dmd hook stop",\n              "timeout": 30\n            }\n          ]\n        }\n      ],\n      "TaskCompleted": [\n        {\n          "hooks": [\n            {\n              "type": "command",\n              "command": "env \'DMD_STATE=/tmp/tmp5vamc65r/private state\' /opt/pyvenv/bin/python3 /mnt/data/done-means-done/bin/dmd hook task-completed",\n              "timeout": 30\n            }\n          ]\n        }\n      ],\n      "PostToolUse": [\n        {\n          "hooks": [\n            {\n              "type": "command",\n              "command": "env \'DMD_STATE=/tmp/tmp5vamc65r/private state\' /opt/pyvenv/bin/python3 /mnt/data/done-means-done/bin/dmd hook post-tool-use",\n              "timeout": 10\n            }\n          ],\n          "matcher": "Edit|Write|Bash"\n        }\n      ],\n      "PostToolUseFailure": [\n        {\n          "hooks": [\n            {\n              "type": "command",\n              "command": "env \'DMD_STATE=/tmp/tmp5vamc65r/private state\' /opt/pyvenv/bin/python3 /mnt/data/done-means-done/bin/dmd hook post-tool-failure",\n              "timeout": 10\n            }\n          ],\n          "matcher": "Bash"\n        }\n      ]\n    }\n  }\n}\n', '')
+
+----------------------------------------------------------------------
+Ran 14 tests in 6.965s
+
+FAILED (failures=1, errors=1)

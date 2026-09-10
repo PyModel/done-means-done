@@ -1,0 +1,114 @@
+$ python3 -B bin/dmd --version
+0.4.0
+
+$ python3 -B bin/dmd init --help  (first line)
+usage: dmd init [-h] [-m MESSAGE] [--request-file REQUEST_FILE]
+                --authority AUTHORITY [--session SESSION] [--new]
+
+$ python3 -B bin/dmd req --help  (first line)
+usage: dmd req [-h] [--id ID] [--anchor ANCHOR] [--authority AUTHORITY]
+               {add,cancel,attest-only} [text]
+
+$ python3 -B bin/dmd work --help  (first line)
+usage: dmd work [-h] [--req REQ] [--id ID] [--dep DEP] [--owns OWNS]
+                [--status {doing,implemented,todo,verified}] [--note NOTE]
+
+$ python3 -B bin/dmd check --help  (first line)
+usage: dmd check [-h] [--req REQ] [--id ID] [--cmd CMD] [--run-cwd RUN_CWD]
+                 [--expect EXPECT] [--match MATCH] [--red-match RED_MATCH]
+
+$ python3 -B bin/dmd preview --help  (first line)
+usage: dmd preview [-h] id
+
+
+$ python3 -B bin/dmd approve --help  (first line)
+usage: dmd approve [-h] --note NOTE id
+
+
+$ python3 -B bin/dmd run --help  (first line)
+usage: dmd run [-h] [--red] id
+
+
+$ python3 -B bin/dmd finding --help  (first line)
+usage: dmd finding [-h] [--id ID] [--location LOCATION]
+                   [--status {confirmed,disproved,duplicate,fixed-unverified,fixed-verified,suspected}]
+
+$ python3 -B bin/dmd blocker --help  (first line)
+usage: dmd blocker [-h] [--id ID] [--item ITEM] [--owner OWNER]
+                   [--unblock UNBLOCK] [--proof PROOF]
+
+$ python3 -B bin/dmd uncertain --help  (first line)
+usage: dmd uncertain [-h] [--id ID] [--proof PROOF] {add,resolve} [text]
+
+
+$ python3 -B bin/dmd coverage --help  (first line)
+usage: dmd coverage [-h] [--note NOTE] {show,assert}
+
+
+$ python3 -B bin/dmd review --help  (first line)
+usage: dmd review [-h] --kind {self,independent} --reviewer REVIEWER
+                  --note NOTE --evidence EVIDENCE
+
+$ python3 -B bin/dmd status --help  (first line)
+usage: dmd status [-h] [--json] [--save]
+
+
+$ python3 -B bin/dmd next --help  (first line)
+usage: dmd next [-h] [--json] [--save]
+
+
+$ python3 -B bin/dmd gate --help  (first line)
+usage: dmd gate [-h] [--json] [--save]
+
+
+$ python3 -B bin/dmd report --help  (first line)
+usage: dmd report [-h] [--json] [--save]
+
+
+$ python3 -B bin/dmd handoff --help  (first line)
+usage: dmd handoff [-h] [--json] [--save]
+
+
+$ python3 -B bin/dmd reconcile --help  (first line)
+usage: dmd reconcile [-h] [--json] [--save]
+
+
+$ python3 -B bin/dmd state --help  (first line)
+usage: dmd state [-h] --reason REASON [--authority AUTHORITY]
+                 {ACTIVE,PAUSED,CANCELLED}
+
+$ python3 -B bin/dmd amend --help  (first line)
+usage: dmd amend [-h] text
+
+
+$ python3 -B bin/dmd attempt --help  (first line)
+usage: dmd attempt [-h] [--strategy STRATEGY] item signature
+
+
+$ python3 -B bin/dmd bind-session --help  (first line)
+usage: dmd bind-session [-h] session
+
+
+$ python3 -B bin/dmd map-host-task --help  (first line)
+usage: dmd map-host-task [-h] --host-id HOST_ID --work WORK
+
+
+$ python3 -B bin/dmd recover-run --help  (first line)
+usage: dmd recover-run [-h] --proof PROOF
+
+
+$ python3 -B bin/dmd config --help  (first line)
+usage: dmd config [-h] [--mode {off,observe,enforce}]
+                  [--max-no-progress MAX_NO_PROGRESS]
+
+$ python3 -B bin/dmd hook --help  (first line)
+usage: dmd hook [-h]
+                {session-start,stop,task-completed,post-tool-use,post-tool-failure}
+
+$ python3 -B bin/dmd list --help  (first line)
+usage: dmd list [-h]
+
+
+$ python3 -B bin/dmd migrate --help  (first line)
+usage: dmd migrate [-h] --from-task FROM_TASK --authority AUTHORITY [--new]
+
