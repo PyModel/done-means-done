@@ -4,7 +4,7 @@ description: Complete substantial authorized assignments with a persistent requi
 license: MIT
 compatibility: Python 3.10+ on macOS or Linux. Git is optional. Claude Code lifecycle hooks are optional and explicitly installed.
 metadata:
-  version: "0.5.0"
+  version: "0.5.1"
 ---
 
 # Done Means Done
@@ -17,9 +17,9 @@ This is one skill backed by the included `dmd` CLI. `task.json` is the source of
 
 For a local Claude Code skill, the runtime is `python3 "${CLAUDE_SKILL_DIR}/bin/dmd"`; the host's skill substitution for this session is `${CLAUDE_SESSION_ID}`. These are skill-rendered substitutions, not a promise that shell environment variables exist. When another host leaves them literal, resolve the actual installed skill directory and host session identity. Never invent an ID or claim hook enforcement without a real binding.
 
-Below, `dmd` means the included executable on `PATH`, or that full Python command. Define it as a shell function, not a string stored in a variable: `dmd() { python3 "${CLAUDE_SKILL_DIR}/bin/dmd" "$@"; }`. A variable holding `python3 /path/dmd` is one word to zsh and fails silently when expanded; a function forwards every argument intact. Read [commands](references/commands.md) before using unfamiliar flags. Verify `dmd --version`. If the runtime is unavailable, preserve the request and report the missing capability; do not imitate a successful gate with handwritten JSON.
+Below, `dmd` means the included executable on `PATH`. Prefer the PATH shim: `python3 "${CLAUDE_SKILL_DIR}/hooks/install.py" --link-bin --no-hooks --apply` symlinks `bin/dmd` into `~/.local/bin` once, and every later shell and tool call finds it. When no shim is installed, the fallback is a shell function defined in the same command block that uses it: `dmd() { python3 "${CLAUDE_SKILL_DIR}/bin/dmd" "$@"; }`. Agent harnesses do not carry functions between tool calls, and a variable holding `python3 /path/dmd` is one word to zsh and fails silently when expanded. Read [commands](references/commands.md) before using unfamiliar flags. Verify `dmd --version`. If the runtime is unavailable, preserve the request and report the missing capability; do not imitate a successful gate with handwritten JSON.
 
-Activation applies to this assignment until verified completion, an explicit operator amendment, pause, or cancellation. Loading this file while recovering an already authorized assignment restores its obligations; it does not authorize an unrelated new task or silently reactivate a cancelled task.
+Activation applies to this assignment until verified completion, an explicit operator amendment, pause, or cancellation. Loading this file while recovering an already authorized assignment restores its obligations; it does not authorize an unrelated new task or silently reactivate a cancelled task. A session that resumes an initialised task reads [recovery](references/recovery.md) and the output of `dmd reconcile`, then continues from `dmd next`; the SessionStart hook says so and repeats the gate headline. This file is for initialising a new assignment.
 
 Record the authorized project, target environments, external effects, and relevant security and spending permissions in the request/requirements. Task size, estimated duration, day boundaries, context size, and a preference to save effort are not reasons to omit work or weaken verification. Use approved resources productively; do not create artificial depth, retry identical failures indefinitely, bypass a permission, or spend through an unauthorized account.
 
@@ -120,7 +120,7 @@ Reverify affected dependencies and the integrated candidate.
 Continue to the next executable obligation.
 ```
 
-Use `dmd next` after each slice, and `dmd work list`, `dmd check list`, `dmd finding list`, `dmd blocker list` or `dmd status --only owed` for one group instead of the full ledger. A leaf return, completed plan phase, successful build, context compaction, or checkpoint is not assignment completion. Do not request another "continue" for executable work already authorized.
+Use `dmd next` after each slice, and `dmd work list`, `dmd check list`, `dmd finding list`, `dmd blocker list` or `dmd status --only owed` for one group instead of the full ledger. Every gate reason names its cause (`not run`, `FAIL`, `stale: <candidate> changed`, `definition edited`, `receipt predates 0.5.0 candidate binding`), and the `summary` block of `gate` / `next` gives a one-line headline, the checks grouped by cause, and the exact `dmd run …` that discharges stale, failed and unrun checks. Read the headline before the list. A leaf return, completed plan phase, successful build, context compaction, or checkpoint is not assignment completion. Do not request another "continue" for executable work already authorized.
 
 States `todo`, `doing`, `implemented`, and `verified` are distinct. `work set --status verified` requires current mapped evidence. A native host todo entry is a view, not acceptance authority.
 
@@ -148,7 +148,7 @@ Never weaken assertions, delete relevant tests, suppress failures, blanket-skip 
 
 Required checks cannot be marked not applicable. Decide applicability in the verification plan before creating obligations; document the reason. If an already-required check cannot run, it stays unfinished unless the operator actually changes the acceptance contract.
 
-Content fingerprints cover tracked and nonignored untracked files plus explicit `--input` files, of each check's **candidate**: the tree it tests. The candidate defaults to the task root when the check runs inside it, and to the checkout its `--run-cwd` belongs to otherwise, so a check running in a linked worktree is bound to that worktree and an edit in the shared checkout does not invalidate it. Override with `--candidate /path`. The receipt records the candidate and its HEAD. Declare ignored configuration and external verifier/dependency inputs where relevant. Re-run checks after final integration and confirm the candidate did not change. HEAD alone, historical green, and metadata-only fingerprints are insufficient.
+Content fingerprints cover tracked and nonignored untracked files plus explicit `--input` files, of each check's **candidate**: the tree it tests. The candidate defaults to the task root when the check runs inside it, and to the checkout its `--run-cwd` belongs to otherwise, so a check running in a linked worktree is bound to that worktree and an edit in the shared checkout does not invalidate it. Override with `--candidate /path`. The receipt records the candidate and its HEAD. Declare ignored configuration and external verifier/dependency inputs where relevant. Re-run checks after final integration and confirm the candidate did not change. HEAD alone, historical green, and metadata-only fingerprints are insufficient. A receipt written before 0.5.0 carries no candidate; it stays accepted while the task root is unchanged, is labelled as such in the report, and binds to its real candidate on the next run. `dmd run` reports a `start` and `finish` event per check on stderr; stdout stays one JSON row per result.
 
 A command that passed against a candidate which moved during the run is reported as `STALE`, not `FAIL`, with the HEAD before and after and the changed paths; it is still not accepted. `dmd run A-01 A-03` or `dmd run --all` runs a list in one fingerprint window: every candidate is snapshotted once at the start and once at the end, so a move mid-sequence names every affected receipt instead of quietly staling the earlier passes. Before any run, `dmd` refuses a candidate whose dirty files were modified within the quiet window (default 3 s, `--quiet-window 0` to skip) or that another task's live run holds; a concurrent writer is named up front instead of discovered after a long integration run. Checks that share a database, port, or fixture take `--exclusive NAME`; two checks with the same tag never run concurrently, across worktrees and sessions on this machine.
 
@@ -174,7 +174,7 @@ dmd gate
 dmd report --save
 ```
 
-Only `dmd gate` may compute `COMPLETE`. It requires current coverage, all active outcomes and mapped work verified, current evidence, at least one executed acceptance check per active requirement unless the operator authorized attested-only acceptance, all recorded findings resolved, meaningful regression proof, no open blocker/unknown operation/running check, and a current final review. Post-review changes reopen the gate.
+Only `dmd gate` may compute `COMPLETE`. It requires current coverage, all active outcomes and mapped work verified, current evidence, at least one executed acceptance check per active requirement unless the operator authorized attested-only acceptance, all recorded findings resolved, meaningful regression proof, no open blocker/unknown operation/running check, and a current final review. Post-review changes reopen the gate: a moved candidate, an edited contract or a changed outcome. Rerunning a check on a byte-identical candidate with the same result does not; the review vouched for that state already. `dmd gate --brief` and `dmd next --brief` replace the per-candidate source map with its digest.
 
 A review run against an incomplete task is recorded as a rejected review with its outstanding reasons; it does not satisfy the gate, and the report shows the review history.
 

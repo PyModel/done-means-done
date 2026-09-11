@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
 from .source import candidate_root, drift, identity, recent_writes
-from .model import (SCHEMA, FINDING_STATES, WORK_STATES, accepted, attested, check_candidate, check_definition,
+from .model import (SCHEMA, FINDING_STATES, WORK_STATES, accepted, acceptance_reason, attested, check_candidate, check_definition, legacy_receipt,
                     contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, validation_errors, work_ok)
 from .runner import approval_drift, approval_parts, approval_signature, execute, SHELL
@@ -297,8 +297,11 @@ def work(args):
                     raise DmdError("dependencies must have current verification before work starts/closes")
                 if args.status == "verified":
                     cs = [c for c in live(t["checks"]) if w["id"] in c["work"]]
-                    if not cs or not all(accepted(directory, c, fp) for c in cs):
-                        raise DmdError("work cannot be verified without current mapped acceptance evidence")
+                    owed = {c["id"]: acceptance_reason(directory, c, fp, t["root"]) for c in cs}
+                    owed = {k: v for k, v in owed.items() if v}
+                    if not cs or owed:
+                        detail = "; ".join(f"{k}: {v}" for k, v in owed.items()) or "no mapped check"
+                        raise DmdError("work cannot be verified without current mapped acceptance evidence: " + detail)
                 w["status"] = args.status
             print(w["id"] + " " + w["status"])
 
@@ -558,10 +561,16 @@ def run(args):
                     # interrupted run. Earlier results in the list are kept.
                     refused = f"{c['id']}: {exc}"
                     break
+                # Progress goes to stderr so stdout stays one JSON row per result; a
+                # watcher can tell a 20-minute integration run from a hang.
+                print(json.dumps({"check": c["id"], "event": "start", "candidate": check_candidate(c, t["root"]),
+                                  "timeout": c["timeout"], "at": now()}), file=sys.stderr, flush=True)
                 try:
                     results.append(execute(c, cancelled))
                 finally:
                     holder.__exit__(None, None, None)
+                print(json.dumps({"check": c["id"], "event": "finish", "exit": results[-1]["exit"],
+                                  "duration_s": results[-1]["duration_s"], "failure": results[-1]["failure"]}), file=sys.stderr, flush=True)
                 if results[-1]["failure"] == "CANCELLED":
                     break
         except BaseException:
@@ -785,7 +794,8 @@ def sections(directory, t, g):
     out["work"] = lines
     lines = ["## Checks"]
     for c in t["checks"]:
-        current = accepted(directory, c, g.get("source"))
+        reason = acceptance_reason(directory, c, g.get("source"), t["root"])
+        current = reason is None
         if c.get("removed"):
             basis = "superseded"
         else:
@@ -802,13 +812,15 @@ def sections(directory, t, g):
             lines.append("  Evidence: " + str(directory / r["artifact"]["path"]))
             if r.get("candidate"):
                 lines.append(f"  Tested: {r['candidate']} @ {r.get('head') or 'no-head'}")
+            elif legacy_receipt(c):
+                lines.append(f"  Tested: task root (receipt predates 0.5.0 candidate binding); rerun to bind it to {check_candidate(c, t['root'])}")
             if r.get("stale"):
                 d = r["stale"].get("drift") or {}
                 why = "definition changed" if r["stale"].get("definition_changed") else "candidate moved"
                 moved = ", ".join(d.get("changed", [])[:5]) or "none listed"
                 lines.append(f"  STALE: {why}; HEAD {d.get('head_before') or 'no-head'} -> {d.get('head_after') or 'no-head'}; changed: {moved}")
-            if not current and c["status"] == "PASS" and not c.get("removed"):
-                lines.append("  Unverified because: the tested candidate no longer matches the current source")
+            if not current and not c.get("removed"):
+                lines.append("  Unverified because: " + reason)
             if r.get("background_holders"):
                 lines.append("  Note: background processes still held the output pipes when this check finished.")
         if c.get("baseline"):
@@ -873,6 +885,10 @@ def inspect_task(args):
             atomic(directory / "report.md", text)
         if getattr(args, "only", None):
             text = render(directory, t, g, only=set(args.only))
+    if args.brief and "source" in g:
+        # The map is one line per candidate; a digest identifies the same state in one.
+        g = dict(g, source_digest=source_digest(g["source"]), candidates=len(g["source"]))
+        del g["source"]
     if args.command == "status" and args.json:
         print(json.dumps({"task_dir": str(directory), "task": t, "gate": g}, indent=2))
     elif args.command in ("gate", "next"):
@@ -954,14 +970,45 @@ def configuration(args):
     print(json.dumps(data))
 
 
+HELP = {
+    "init": "Create the durable task record for an authorized assignment",
+    "req": "Add, cancel, list, or mark attest-only a requirement",
+    "work": "Add, edit, remove, or list work items and set their status",
+    "check": "Add, edit, list, or attest acceptance checks; record a red baseline",
+    "preview": "Print exactly what a check will execute, for approval",
+    "approve": "Approve a check's command after inspecting its preview",
+    "run": "Execute checks (IDs or --all) in one fingerprint window",
+    "finding": "Record, update, or list defects found in the project",
+    "blocker": "Record, clear, or list concrete external blockers",
+    "uncertain": "Record or reconcile an external operation with unknown outcome",
+    "coverage": "Show the contract or assert request-to-inventory coverage",
+    "review": "Record the final request/diff/integration review",
+    "status": "Print the report (--json for task and gate)",
+    "next": "Gate JSON with the next executable actions",
+    "gate": "Compute and store the gate; exit 0 only on COMPLETE",
+    "report": "Print the full report (--save writes report.md)",
+    "handoff": "Write handoff.md for the next session",
+    "reconcile": "Re-derive the handoff on resume and print it",
+    "state": "Set the task ACTIVE, PAUSED, or CANCELLED with a reason",
+    "amend": "Record an operator amendment to the request",
+    "attempt": "Record a failed attempt signature for a work item",
+    "bind-session": "Bind a host session ID to this task",
+    "map-host-task": "Map a native host todo ID to a work item",
+    "recover-run": "Clear an interrupted run after checking the runner",
+    "config": "Set the hook mode (off, observe, enforce) and watchdog limit",
+    "hook": "Entry point for installed host lifecycle hooks",
+    "list": "List every task record in the state directory",
+    "migrate": "Import a schema-1 record into a new schema-2 task",
+}
+
 def parser():
     p = argparse.ArgumentParser(prog="dmd", description="Persistent obligations, strict remediation, verified completion")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("--cwd", default=os.getcwd())
     p.add_argument("--task")
-    sub = p.add_subparsers(dest="command", required=True)
+    sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
     def command(name, fn):
-        s = sub.add_parser(name); s.set_defaults(func=fn); return s
+        s = sub.add_parser(name, help=HELP[name], description=HELP[name]); s.set_defaults(func=fn); return s
     s = command("init", init); s.add_argument("-m", "--message"); s.add_argument("--request-file"); s.add_argument("--authority", required=True); s.add_argument("--session"); s.add_argument("--new", action="store_true"); s.add_argument("--independent-review", action="store_true")
     s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--authority"); s.add_argument("--json", action="store_true")
     s = command("work", work); s.add_argument("action", choices=["add", "set", "remove", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace"); s.add_argument("--json", action="store_true")
@@ -979,7 +1026,8 @@ def parser():
     s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert"]); s.add_argument("--note")
     s = command("review", review); s.add_argument("--kind", choices=["self", "independent"], required=True); s.add_argument("--reviewer", required=True); s.add_argument("--note", required=True); s.add_argument("--evidence", required=True)
     for name in ["status", "next", "gate", "report", "handoff", "reconcile"]:
-        s = command(name, inspect_task); s.add_argument("--json", action="store_true"); s.add_argument("--save", action="store_true"); s.add_argument("--only", action="append", choices=SECTIONS)
+        s = command(name, inspect_task); s.add_argument("--json", action="store_true"); s.add_argument("--save", action="store_true"); s.add_argument("--only", action="append", choices=SECTIONS, help="render one report section")
+        s.add_argument("--brief", action="store_true", help="omit the per-candidate source map from gate JSON")
     s = command("state", other); s.add_argument("status", choices=["ACTIVE", "PAUSED", "CANCELLED"]); s.add_argument("--reason", required=True); s.add_argument("--authority")
     s = command("amend", other); s.add_argument("text")
     s = command("attempt", other); s.add_argument("item"); s.add_argument("signature"); s.add_argument("--strategy")

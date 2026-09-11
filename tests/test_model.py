@@ -110,7 +110,13 @@ class ModelCase(unittest.TestCase):
     def test_requirement_removal_needs_authority(self): self.t["requirements"][0]["status"] = "removed"; self.blocked("authority")
     def test_all_requirements_removed_not_success(self): self.t["requirements"][0].update(status="removed", authority="operator cancelled"); self.seal(); self.blocked("no active")
     def test_final_review_required(self): self.t["review"] = None; self.blocked("review")
-    def test_final_review_invalidated_by_receipt(self): self.c["receipt"]["at"] = "later rerun"; self.blocked("review")
+    def test_final_review_survives_identical_rerun(self):
+        self.c["receipt"].update(at="later rerun", duration_s=9.5, artifact=evidence(self.directory, "SYNTHETIC rerun log"))
+        self.assertEqual(self.gate()["status"], "COMPLETE")
+    def test_final_review_invalidated_by_changed_source(self):
+        (self.repo / "source.txt").write_text("edited\n"); fp = m.task_fingerprint(self.t)
+        self.c["receipt"]["source"] = m.source_for(fp, self.c); self.blocked("review")
+    def test_final_review_invalidated_by_changed_outcome(self): self.c["receipt"]["note"] = "different observation"; self.blocked("review")
     def test_independent_review_not_self_review(self): self.t["require_independent_review"] = True; self.blocked("independent")
     def test_independent_review_record_accepted_when_required(self): self.t["require_independent_review"] = True; self.t["review"]["kind"] = "independent"; self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_preexisting_confirmed_finding_blocks(self): self.finding(); self.seal(); self.blocked("F-01")

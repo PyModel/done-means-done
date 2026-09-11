@@ -69,7 +69,12 @@ def main(argv=None):
     p.add_argument("--state-dir", default=os.environ.get("DMD_STATE", str(Path.home() / ".local/state/done-means-done")))
     p.add_argument("--apply", action="store_true")
     p.add_argument("--remove", action="store_true")
+    p.add_argument("--link-bin", nargs="?", const=str(Path.home() / ".local/bin"), metavar="DIR",
+                   help="symlink bin/dmd into DIR (default ~/.local/bin) so `dmd` is on PATH in every shell and tool call")
+    p.add_argument("--no-hooks", action="store_true", help="leave settings.json alone; only manage the PATH link")
     args = p.parse_args(argv)
+    if args.no_hooks and not (args.link_bin or args.remove):
+        p.error("--no-hooks needs --link-bin or --remove")
     # Canonicalize the containing directory so a legitimately symlinked settings home
     # (a dotfiles checkout, or /tmp and /var on macOS) resolves to its physical path.
     # The settings file itself is still refused if it is a symlink: writing through it
@@ -87,18 +92,60 @@ def main(argv=None):
         ("PostToolUseFailure", "Bash", command + " post-tool-failure", 10),
     ]
     manifest_path = state / "installations" / (digest(str(path)) + ".json")
+    link = Path(os.path.realpath(Path(args.link_bin).expanduser())) / "dmd" if args.link_bin else None
     # Preview is read-only, including state and settings directories.
     def owned(cmd):
         """A registration this package installed, even if the manifest or interpreter moved."""
         return isinstance(cmd, str) and str(runtime) in cmd and cmd.rstrip().rsplit(" ", 1)[-1] in EVENTS
 
+    def link_owned(target):
+        """A link this package (any release) installed: it points at a done-means-done bin/dmd."""
+        return target.name == "dmd" and target.parent.name == "bin" and (target.parent.parent / "dmdlib" / "cli.py").exists()
+
+    def manage_link(previous):
+        """Create or remove the PATH shim. Refuses to replace anything that is not our own link."""
+        wanted = None if args.remove else link
+        current = Path(previous.get("bin_link")) if previous.get("bin_link") else None
+        for candidate in {c for c in (current, link) if c is not None}:
+            if candidate.is_symlink():
+                target = Path(os.readlink(candidate))
+                if not target.is_absolute():
+                    target = candidate.parent / target
+                if not link_owned(target):
+                    raise DmdError(f"{candidate} is a symlink to {target}, not a dmd runtime; remove it yourself")
+            elif candidate.exists():
+                raise DmdError(f"{candidate} exists and is not a symlink; remove it yourself or choose another --link-bin DIR")
+        if not args.apply:
+            if args.no_hooks:
+                print(json.dumps({"preview": True, "bin_link": str(wanted) if wanted else None, "target": str(runtime),
+                                  "remove": args.remove, "current": str(current) if current else None}))
+            return str(wanted) if wanted else None
+        if current and current != wanted and current.is_symlink():
+            current.unlink(); print("removed PATH link: " + str(current))
+        if wanted:
+            wanted.parent.mkdir(parents=True, exist_ok=True)
+            if wanted.is_symlink():
+                wanted.unlink()
+            os.symlink(runtime, wanted)
+            print(f"PATH link: {wanted} -> {runtime}" + ("" if str(wanted.parent) in os.environ.get("PATH", "").split(os.pathsep) else f" ({wanted.parent} is not on PATH in this shell)"))
+        return str(wanted) if wanted else None
+
     def perform():
+        previous = read_json(manifest_path) if manifest_path.exists() else {"commands": []}
+        if link is not None or (args.remove and previous.get("bin_link")):
+            bin_link = manage_link(previous)
+        else:
+            bin_link = previous.get("bin_link")
+        if args.no_hooks:
+            if args.apply:
+                private_dir(manifest_path.parent)
+                atomic(manifest_path, json.dumps({"settings": str(path), "commands": previous.get("commands", []), "bin_link": bin_link}, indent=2))
+            return 0
         if path.is_symlink():
             raise DmdError("refusing a symlinked settings file; point --settings at the physical file")
         raw = path.read_bytes() if path.exists() else None
         data = json.loads(raw) if raw is not None else {}
         validate(data)
-        previous = read_json(manifest_path) if manifest_path.exists() else {"commands": []}
         managed = set(previous.get("commands", [])) | {x[2] for x in desired}
         hooks = data.setdefault("hooks", {})
         for event, groups in list(hooks.items()):
@@ -121,7 +168,7 @@ def main(argv=None):
         if not hooks:
             data.pop("hooks", None)
         if not args.apply:
-            print(json.dumps({"preview": True, "settings": str(path), "remove": args.remove, "result": data}, indent=2))
+            print(json.dumps({"preview": True, "settings": str(path), "remove": args.remove, "bin_link": bin_link, "result": data}, indent=2))
             return 0
         # Detect ordinary concurrent changes before replacement; external writers
         # that ignore this installer lock are not a transactionally isolated service.
@@ -133,7 +180,7 @@ def main(argv=None):
         else:
             print("settings unchanged")
         private_dir(manifest_path.parent)
-        atomic(manifest_path, json.dumps({"settings": str(path), "commands": [] if args.remove else [x[2] for x in desired]}, indent=2))
+        atomic(manifest_path, json.dumps({"settings": str(path), "commands": [] if args.remove else [x[2] for x in desired], "bin_link": bin_link}, indent=2))
         print("hook registrations removed; state preserved" if args.remove else "hook registrations installed; use dmd config to select observe/enforce")
         return 0
     try:

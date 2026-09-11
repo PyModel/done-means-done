@@ -59,7 +59,7 @@ dmd run A-01 --wait-exclusive 30
 
 Before executing, `run` refuses a candidate whose dirty or untracked files were modified within `--quiet-window` seconds (default 3; `0` disables) and a candidate that another task's recorded live run holds, naming the paths or the other task and whether its runner is alive. Nothing is recorded for a refused run.
 
-`run` with several IDs, or `--all`, snapshots every candidate once before the first check and once after the last. Every receipt binds to the start state. A candidate that moved in between makes every receipt on it `STALE`, and the trailing batch line lists what moved. A list is refused before anything runs if one check lacks a current approval. Interrupting a list loses the results not yet written; the run is recorded as interrupted for `recover-run`.
+`run` prints one JSON row per result on stdout and a `start` / `finish` event per check on stderr (`{"check","event":"start","candidate","timeout","at"}`, then `{"check","event":"finish","exit","duration_s","failure"}`), so a watcher can tell a long check from a hung one. `run` with several IDs, or `--all`, snapshots every candidate once before the first check and once after the last. Every receipt binds to the start state. A candidate that moved in between makes every receipt on it `STALE`, and the trailing batch line lists what moved. A list is refused before anything runs if one check lacks a current approval. Interrupting a list loses the results not yet written; the run is recorded as interrupted for `recover-run`.
 
 A check whose command passed (expected exit, literal match, within bounds) while its candidate or definition moved is reported as `STALE` (`RED-STALE` for a red run) instead of `FAIL`. The row and the receipt carry `stale.drift`: HEAD before and after and up to 50 changed paths. The status stays `FAIL` and the receipt is not accepted.
 
@@ -130,6 +130,20 @@ dmd uncertain resolve --id U-01 --proof "Queried deployment identity and verifie
 
 Blocker `--item` names `task` or an existing R/W/A/F ID. For dependency scheduling, prefer the exact blocked work item or requirement. The scheduler is conservative; precise IDs avoid unnecessary whole-task suspension. Open blockers and unknown effects always prevent COMPLETE.
 
+## Gate output
+
+```bash
+dmd gate            # JSON: status, reasons, next, source, attestation, summary
+dmd next            # same shape; run after every slice
+dmd gate --brief    # source map replaced by source_digest and a candidate count
+dmd status --json   # task_dir, task, gate
+dmd --help          # every subcommand with a one-line description; dmd COMMAND --help for flags
+```
+
+`reasons` is one line per unmet obligation and every line names its cause: `A-01: not run`, `A-02: FAIL: exit or match failed; fix and rerun`, `A-03: stale: /path/worktree changed since the receipt (tested @ <head>); rerun`, `A-04: STALE: passed while its candidate or definition moved; rerun`, `A-05: definition edited; inspect, approve and rerun`, `A-06: receipt predates 0.5.0 candidate binding and the task root has since changed; rerun to bind it to /path`, `W-01: verified, but evidence is not current for A-03`, `review: …`.
+
+`summary` groups them: `headline` (one line), `checks` as `accepted` / `legacy` / `stale` / `failed` / `not_run` / `unapproved` / `other` ID lists, `work_unverified`, `findings_open`, `blockers_open`, `review` (`current` or `owed`), and `rerun`, the `dmd run A-01 A-03 …` that discharges the stale, failed and unrun checks (`null` when none). `legacy` lists checks accepted on a pre-0.5.0 receipt bound to the task root; their next run rebinds them.
+
 ## Review, reporting and recovery
 
 ```bash
@@ -143,7 +157,7 @@ dmd next
 dmd handoff
 ```
 
-Use `self` unless a genuinely separate reviewer performed the review. All other acceptance conditions must be ready before the final review can be recorded. Reports distinguish this attestation; the runtime does not authenticate reviewer identity.
+Use `self` unless a genuinely separate reviewer performed the review. All other acceptance conditions must be ready before the final review can be recorded. The review binds to the contract, the source map, and the identity of each piece of evidence (candidate, definition, outcome, observation), not to receipt timestamps or log paths: a rerun that reproduces the same pass on a byte-identical candidate keeps the review current; a moved tree, an edited contract or a changed outcome reopens it. Reports distinguish this attestation; the runtime does not authenticate reviewer identity.
 
 `gate` emits JSON and exits 0 only for COMPLETE, 1 for a valid unfinished/suspended assignment, and 2 for input/infrastructure errors. `run` exits 0 when every listed check is an accepted green or intentional red, 1 when any failed or went stale, and 2 for setup/approval/preflight/exclusive-resource errors. `next` emits JSON; `status --json` exposes state plus computed gate; `report --save` and `handoff` write generated views outside the project. `list` labels stored state, which may need current revalidation, and reports an unreadable record as its own row instead of failing the listing. Exit 3 means a defect in dmd itself, not a usage error: the task record was not advanced and the trace should be reported. A lock held by another `dmd` process is waited out with backoff for `DMD_LOCK_WAIT` seconds (default 5) before exit 2 names the wait; `no active task in this worktree` lists unfinished tasks of sibling worktrees when any exist.
 

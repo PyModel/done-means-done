@@ -1,6 +1,9 @@
 test_first_install_creates_valid_settings (test_adoption.AdoptionCase.test_first_install_creates_valid_settings) ... ok
 test_install_preserves_existing_settings_and_hooks (test_adoption.AdoptionCase.test_install_preserves_existing_settings_and_hooks) ... ok
 test_invalid_settings_shape_not_modified (test_adoption.AdoptionCase.test_invalid_settings_shape_not_modified) ... ok
+test_link_bin_alone_leaves_settings_untouched (test_adoption.AdoptionCase.test_link_bin_alone_leaves_settings_untouched) ... ok
+test_link_bin_previews_then_installs_a_path_shim_and_removes_it (test_adoption.AdoptionCase.test_link_bin_previews_then_installs_a_path_shim_and_removes_it) ... ok
+test_link_bin_refuses_a_foreign_file_or_link (test_adoption.AdoptionCase.test_link_bin_refuses_a_foreign_file_or_link) ... ok
 test_migration_discards_green_and_reopens_confirmed_findings (test_adoption.AdoptionCase.test_migration_discards_green_and_reopens_confirmed_findings) ... ok
 test_migration_invalid_graph_leaves_active_task_unchanged (test_adoption.AdoptionCase.test_migration_invalid_graph_leaves_active_task_unchanged) ... ok
 test_migration_preserves_cancelled_state (test_adoption.AdoptionCase.test_migration_preserves_cancelled_state) ... ok
@@ -45,6 +48,18 @@ test_old_dirty_files_are_not_writers (test_candidates.PreflightCase.test_old_dir
 test_recent_dirty_write_is_refused_with_the_path (test_candidates.PreflightCase.test_recent_dirty_write_is_refused_with_the_path) ... ok
 test_untracked_recent_files_count (test_candidates.PreflightCase.test_untracked_recent_files_count) ... ok
 test_zero_window_disables_the_check (test_candidates.PreflightCase.test_zero_window_disables_the_check) ... ok
+test_brief_gate_replaces_the_source_map_with_a_digest (test_candidates.ReasonCase.test_brief_gate_replaces_the_source_map_with_a_digest) ... ok
+test_every_reason_names_its_cause_and_the_summary_groups_them (test_candidates.ReasonCase.test_every_reason_names_its_cause_and_the_summary_groups_them) ... ok
+test_every_subcommand_has_help_text (test_candidates.ReasonCase.test_every_subcommand_has_help_text) ... ok
+test_failed_check_reason_and_verified_work_reason (test_candidates.ReasonCase.test_failed_check_reason_and_verified_work_reason) ... ok
+test_legacy_receipt_goes_stale_with_the_root_and_says_why (test_candidates.ReasonCase.test_legacy_receipt_goes_stale_with_the_root_and_says_why) ... ok
+test_legacy_worktree_receipt_is_still_accepted_after_the_upgrade (test_candidates.ReasonCase.test_legacy_worktree_receipt_is_still_accepted_after_the_upgrade) ... ok
+test_rerun_rebinds_a_legacy_receipt_to_its_worktree (test_candidates.ReasonCase.test_rerun_rebinds_a_legacy_receipt_to_its_worktree) ... ok
+test_review_survives_a_rerun_on_an_identical_candidate (test_candidates.ReasonCase.test_review_survives_a_rerun_on_an_identical_candidate) ... ok
+test_run_reports_progress_on_stderr_and_keeps_stdout_rows (test_candidates.ReasonCase.test_run_reports_progress_on_stderr_and_keeps_stdout_rows) ... ok
+test_session_start_tells_a_resuming_session_what_to_read_and_what_is_owed (test_candidates.ReasonCase.test_session_start_tells_a_resuming_session_what_to_read_and_what_is_owed) ... ok
+test_stop_hook_repeats_the_headline_and_rerun_command (test_candidates.ReasonCase.test_stop_hook_repeats_the_headline_and_rerun_command) ... ok
+test_verified_work_with_stale_evidence_names_the_checks (test_candidates.ReasonCase.test_verified_work_with_stale_evidence_names_the_checks) ... ok
 test_dead_runner_is_recovered_with_the_reason (test_candidates.RecoverCase.test_dead_runner_is_recovered_with_the_reason) ... ok
 test_live_runner_refuses_recovery (test_candidates.RecoverCase.test_live_runner_refuses_recovery) ... ok
 test_nothing_to_recover_is_an_error (test_candidates.RecoverCase.test_nothing_to_recover_is_an_error) ... ok
@@ -128,8 +143,10 @@ test_duplicate_missing_target_invalid (test_model.ModelCase.test_duplicate_missi
 test_duplicate_requirement_ids_invalid (test_model.ModelCase.test_duplicate_requirement_ids_invalid) ... ok
 test_edited_evidence_not_accepted (test_model.ModelCase.test_edited_evidence_not_accepted) ... ok
 test_explicit_check_to_work_mapping_required (test_model.ModelCase.test_explicit_check_to_work_mapping_required) ... ok
-test_final_review_invalidated_by_receipt (test_model.ModelCase.test_final_review_invalidated_by_receipt) ... ok
+test_final_review_invalidated_by_changed_outcome (test_model.ModelCase.test_final_review_invalidated_by_changed_outcome) ... ok
+test_final_review_invalidated_by_changed_source (test_model.ModelCase.test_final_review_invalidated_by_changed_source) ... ok
 test_final_review_required (test_model.ModelCase.test_final_review_required) ... ok
+test_final_review_survives_identical_rerun (test_model.ModelCase.test_final_review_survives_identical_rerun) ... ok
 test_fixed_finding_without_regression_blocks (test_model.ModelCase.test_fixed_finding_without_regression_blocks) ... ok
 test_fixed_unverified_finding_blocks (test_model.ModelCase.test_fixed_unverified_finding_blocks) ... ok
 test_forged_artifact_digest_not_accepted (test_model.ModelCase.test_forged_artifact_digest_not_accepted) ... ok
@@ -230,7 +247,7 @@ test_watchdog_pauses_without_claiming_completion (test_runtime.RuntimeCase.test_
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 229 tests in 43.266s
+Ran 246 tests in 48.279s
 
 OK
-DMD_TESTS_PASS:229;skipped=0
+DMD_TESTS_PASS:246;skipped=0

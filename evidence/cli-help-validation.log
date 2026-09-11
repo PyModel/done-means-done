@@ -1,115 +1,123 @@
 $ python3 -B bin/dmd --version  (first line)
-0.5.0
+0.5.1
+
+$ python3 -B bin/dmd --help  (subcommand table)
+positional arguments:
+  COMMAND
+    init           Create the durable task record for an authorized assignment
+    req            Add, cancel, list, or mark attest-only a requirement
+    work           Add, edit, remove, or list work items and set their status
+    check          Add, edit, list, or attest acceptance checks; record a red
+                   baseline
+    preview        Print exactly what a check will execute, for approval
+    approve        Approve a check's command after inspecting its preview
+    run            Execute checks (IDs or --all) in one fingerprint window
+    finding        Record, update, or list defects found in the project
+    blocker        Record, clear, or list concrete external blockers
+    uncertain      Record or reconcile an external operation with unknown
+                   outcome
+    coverage       Show the contract or assert request-to-inventory coverage
+    review         Record the final request/diff/integration review
+    status         Print the report (--json for task and gate)
+    next           Gate JSON with the next executable actions
+    gate           Compute and store the gate; exit 0 only on COMPLETE
+    report         Print the full report (--save writes report.md)
+    handoff        Write handoff.md for the next session
+    reconcile      Re-derive the handoff on resume and print it
+    state          Set the task ACTIVE, PAUSED, or CANCELLED with a reason
+    amend          Record an operator amendment to the request
+    attempt        Record a failed attempt signature for a work item
+    bind-session   Bind a host session ID to this task
+    map-host-task  Map a native host todo ID to a work item
+    recover-run    Clear an interrupted run after checking the runner
+    config         Set the hook mode (off, observe, enforce) and watchdog
+                   limit
+    hook           Entry point for installed host lifecycle hooks
+    list           List every task record in the state directory
+    migrate        Import a schema-1 record into a new schema-2 task
+
+options:
 
 $ python3 -B bin/dmd init --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd init [-h] [-m MESSAGE] [--request-file REQUEST_FILE]
 
 $ python3 -B bin/dmd req --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd req [-h] [--id ID] [--anchor ANCHOR] [--authority AUTHORITY]
 
 $ python3 -B bin/dmd work --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd work [-h] [--req REQ] [--id ID] [--dep DEP] [--owns OWNS]
 
 $ python3 -B bin/dmd check --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd check [-h] [--req REQ] [--id ID] [--cmd CMD] [--run-cwd RUN_CWD]
 
 $ python3 -B bin/dmd preview --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd preview [-h] id
 
 $ python3 -B bin/dmd approve --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd approve [-h] --note NOTE id
 
 $ python3 -B bin/dmd run --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd run [-h] [--all] [--red] [--quiet-window QUIET_WINDOW]
 
 $ python3 -B bin/dmd finding --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd finding [-h] [--id ID] [--location LOCATION]
 
 $ python3 -B bin/dmd blocker --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd blocker [-h] [--json] [--id ID] [--item ITEM] [--owner OWNER]
 
 $ python3 -B bin/dmd uncertain --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd uncertain [-h] [--id ID] [--proof PROOF] {add,resolve} [text]
 
 $ python3 -B bin/dmd coverage --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd coverage [-h] [--note NOTE] {show,assert}
 
 $ python3 -B bin/dmd review --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd review [-h] --kind {self,independent} --reviewer REVIEWER
 
 $ python3 -B bin/dmd status --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd status [-h] [--json] [--save]
 
 $ python3 -B bin/dmd next --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd next [-h] [--json] [--save]
 
 $ python3 -B bin/dmd gate --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd gate [-h] [--json] [--save]
 
 $ python3 -B bin/dmd report --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd report [-h] [--json] [--save]
 
 $ python3 -B bin/dmd handoff --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd handoff [-h] [--json] [--save]
 
 $ python3 -B bin/dmd reconcile --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd reconcile [-h] [--json] [--save]
 
 $ python3 -B bin/dmd state --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd state [-h] --reason REASON [--authority AUTHORITY]
 
 $ python3 -B bin/dmd amend --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd amend [-h] text
 
 $ python3 -B bin/dmd attempt --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd attempt [-h] [--strategy STRATEGY] item signature
 
 $ python3 -B bin/dmd bind-session --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd bind-session [-h] session
 
 $ python3 -B bin/dmd map-host-task --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd map-host-task [-h] --host-id HOST_ID --work WORK
 
 $ python3 -B bin/dmd recover-run --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd recover-run [-h] --proof PROOF
 
 $ python3 -B bin/dmd config --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd config [-h] [--mode {off,observe,enforce}]
 
 $ python3 -B bin/dmd hook --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd hook [-h]
 
 $ python3 -B bin/dmd list --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
+usage: dmd list [-h]
 
 $ python3 -B bin/dmd migrate --help  (first line)
-usage: dmd [-h] [--version] [--cwd CWD] [--task TASK]
-           {init,req,work,check,preview,approve,run,finding,blocker,uncertain,coverage,review,status,next,gate,report,handoff,reconcile,state,amend,attempt,bind-session,map-host-task,recover-run,config,hook,list,migrate} ...
-
+usage: dmd migrate [-h] --from-task FROM_TASK --authority AUTHORITY [--new]

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.1 — 2026-09-11
+
+Nine items from upgrading a live sixteen-check task with four linked worktrees from 0.4.1 to 0.5.0.
+
+A receipt written before 0.5.0 by a check whose cwd is a linked worktree stayed valid on paper (its definition digest was preserved) but not in practice: 0.5.0 compared its source to the worktree fingerprint, and 0.4.x had recorded the task root. Every such green went "stale" on upgrade with no tree changed, and the whole batch had to be rerun. A legacy receipt (no `candidate` field) is now accepted exactly on the guarantee 0.4.x gave it: the task root is unchanged. The report labels it `Tested: task root (receipt predates 0.5.0 candidate binding); rerun to bind it to <worktree>`, and the first rerun binds it properly. A legacy receipt whose root has moved says so instead of "stale/missing".
+
+Every gate reason now names its cause. `A-01: PASS or stale/missing evidence` read as "PASS" to a skimming agent and hid four different next actions. The reasons are now `not run`, `FAIL: <why>; fix and rerun`, `STALE: passed while its candidate or definition moved; rerun`, `stale: <candidate> changed since the receipt (tested @ <head>); rerun`, `definition edited; inspect, approve and rerun`, `receipt predates 0.5.0 candidate binding and the task root has since changed; rerun to bind it to <candidate>`, `evidence artifact missing or altered; rerun`, and `attestation has no recorded observation`. A work item says `status todo, not verified; checks owed: A-01` or `verified, but evidence is not current for A-01, A-02`, and `next` says `rerun stale evidence: A-01, A-02` instead of `reverify stale evidence`. `work set --status verified` names the check and reason that refused it.
+
+`gate`, `next` and `status --json` carry a `summary`: a one-line `headline` (`16 check(s) stale; final review owed`), the check IDs grouped as accepted / legacy / stale / failed / not_run / unapproved / other, unverified work, open findings and blockers, whether the review is current, and `rerun`, the exact `dmd run A-01 A-02 …` that discharges the stale, failed and unrun checks. Twenty-five per-item lines for one cause now read as one fact.
+
+The Stop hook repeats that headline, the first three reasons and the rerun command in both observe and enforce modes. "task remains ACTIVE; dmd gate has not accepted it" told the agent nothing it could act on.
+
+`dmd run` prints a `start` and a `finish` event per check on stderr (check, candidate, timeout; then exit, duration, failure). Stdout is unchanged: one JSON row per result. A watcher can now tell a twenty-minute integration check from a hang.
+
+The runtime is reachable as a PATH shim. `hooks/install.py --link-bin [DIR]` symlinks `bin/dmd` into `DIR` (default `~/.local/bin`), refuses to replace a file or a foreign link, records the link in the installation manifest and removes it on `--remove`; `--no-hooks` manages only the link. SKILL.md mandated a `dmd()` shell function, which an agent harness forgets between tool calls, so every command block redefined it. The function is now the fallback for a session without the shim.
+
+The SessionStart hook no longer tells a resuming session to read the whole SKILL.md. It names the gate headline, the first reasons and the rerun command, and says to read `references/recovery.md` plus `dmd reconcile` output, reserving SKILL.md for initialising a new assignment.
+
+A final review survives a rerun on a byte-identical candidate. The review signature bound to whole receipts, including timestamp, duration and log path, so rerunning the same green checks on the same fingerprints owed a second review of a state that had already been reviewed. It now binds to each receipt's evidence identity (candidate, source, definition, outcome, observation); a moved tree, an edited contract or a changed outcome still reopens it.
+
+`dmd --help` describes every subcommand. `gate --brief` and `next --brief` replace the per-candidate source map with `source_digest` and a `candidates` count.
+
 ## 0.5.0 — 2026-09-11
 
 Evidence follows the tree that was tested. Nine items, all from one session of running integration checks in linked worktrees while another session edited the shared checkout.

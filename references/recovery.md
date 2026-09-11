@@ -10,7 +10,7 @@ This small-file design rewrites the canonical task/history on each mutation. It 
 
 ## Resume the assignment, not a summary
 
-On entry, inspect the bound task with `dmd reconcile`, review the original request/amendments and generated handoff, and select `dmd next`. Confirm the physical worktree and current source, not only the previous chat summary. Reconcile partially implemented work and stale evidence. Unknown operations are investigated before replay.
+On entry, this file and the output of `dmd reconcile` are the reading list; the full SKILL.md is for initialising a new assignment. Inspect the bound task with `dmd reconcile`, review the original request/amendments and generated handoff, read the gate `summary` headline and its `rerun` command before the per-item reasons, and select `dmd next`. Confirm the physical worktree and current source, not only the previous chat summary. Reconcile partially implemented work and stale evidence. Unknown operations are investigated before replay.
 
 State changes persist as they happen. Generate a handoff before planned compaction or transfer, but do not rely on a final callback to save everything. A process can disappear before receiving one.
 

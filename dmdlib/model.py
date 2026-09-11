@@ -213,15 +213,58 @@ def validation_errors(t):
             errors.append(f"{b['id']}: incomplete concrete blocker")
     return errors
 
-def accepted(task_dir, c, fp):
-    if c.get("needs_review") or c.get("removed") or c.get("status") != "PASS":
-        return False
+def legacy_receipt(c):
+    """A receipt written before 0.5.0: it carries no candidate, and its source is the task
+    root fingerprint of that release, whatever tree the check's cwd named."""
     r = c.get("receipt") or {}
-    if r.get("source") != source_for(fp, c) or r.get("definition") != digest(check_definition(c)) or not evidence_ok(task_dir, r.get("artifact")):
-        return False
+    return bool(r) and "candidate" not in r
+
+def _legacy_source_current(r, fp, root):
+    """Whether a pre-0.5.0 receipt still holds the guarantee that release gave it: the task
+    root is unchanged. Root-bound checks rebind exactly; a worktree check keeps 0.4.x
+    semantics (blind to the worktree) until it is rerun, and the report says so."""
+    if not isinstance(fp, dict):
+        return r.get("source") == fp
+    if root is not None:
+        return r.get("source") == fp.get(str(Path(root)))
+    return r.get("source") in fp.values()
+
+def acceptance_reason(task_dir, c, fp, root=None):
+    """None when the check's evidence is currently accepted; otherwise one specific reason.
+    A reader must never have to guess between not run, failed, stale, unapproved and
+    predates-the-upgrade: each is a different next action."""
+    if c.get("removed"):
+        return "superseded"
+    if c.get("needs_review"):
+        return "definition edited; inspect, approve and rerun"
+    r = c.get("receipt") or {}
+    if c.get("status") == "NOT_RUN":
+        return "not run"
+    if c.get("status") != "PASS":
+        if r.get("stale") or r.get("failure") == "CANDIDATE_OR_DEFINITION_CHANGED":
+            return "STALE: passed while its candidate or definition moved; rerun"
+        return "FAIL: " + (str(r.get("failure")) if r.get("failure") else "exit or match failed") + "; fix and rerun"
+    if r.get("definition") != digest(check_definition(c)):
+        return "definition edited since the receipt; approve and rerun"
+    if r.get("source") != source_for(fp, c):
+        cand = check_candidate(c, root)
+        if legacy_receipt(c):
+            if not _legacy_source_current(r, fp, root):
+                return f"receipt predates 0.5.0 candidate binding and the task root has since changed; rerun to bind it to {cand}"
+        else:
+            head = r.get("head") or "no-head"
+            return f"stale: {cand} changed since the receipt (tested @ {head}); rerun"
+    if not evidence_ok(task_dir, r.get("artifact")):
+        return "evidence artifact missing or altered; rerun"
     if c["method"] == "command":
-        return r.get("kind") == "command" and r.get("exit") == 0 and r.get("matched") is True and r.get("failure") is None
-    return r.get("kind") == c["method"] and bool(r.get("note"))
+        if not (r.get("kind") == "command" and r.get("exit") == 0 and r.get("matched") is True and r.get("failure") is None):
+            return "receipt is not a clean command pass; rerun"
+    elif not (r.get("kind") == c["method"] and r.get("note")):
+        return "attestation has no recorded observation"
+    return None
+
+def accepted(task_dir, c, fp, root=None):
+    return acceptance_reason(task_dir, c, fp, root) is None
 
 def red_ok(task_dir, c):
     red = c.get("red") or {}
@@ -234,17 +277,36 @@ def work_ok(task_dir, t, w, fp):
     if w.get("removed"):
         return False
     cs = [c for c in live(t["checks"]) if w["id"] in c["work"]]
-    return w["status"] == "verified" and bool(cs) and all(accepted(task_dir, c, fp) for c in cs)
+    return w["status"] == "verified" and bool(cs) and all(accepted(task_dir, c, fp, t["root"]) for c in cs)
+
+def work_owed(task_dir, t, w, fp):
+    """The IDs of the mapped checks whose evidence is not current for this work item."""
+    return [c["id"] for c in live(t["checks"]) if w["id"] in c["work"] and not accepted(task_dir, c, fp, t["root"])]
 
 def requirement_attestation(task_dir, t, rid, fp):
     """Split a requirement's currently accepted checks into executed and attested."""
-    cs = [c for c in live(t["checks"]) if c["req"] == rid and accepted(task_dir, c, fp)]
+    cs = [c for c in live(t["checks"]) if c["req"] == rid and accepted(task_dir, c, fp, t["root"])]
     return [c for c in cs if not attested(c)], [c for c in cs if attested(c)]
 
+EVIDENCE_IDENTITY = ("kind", "source", "definition", "candidate", "exit", "matched", "failure", "note", "stale", "reason")
+
+def evidence_identity(record):
+    """What a review actually vouched for in a receipt, red run or baseline: the tree and
+    definition it was bound to and the outcome. Not the timestamp, duration or log path:
+    rerunning the same command on a byte-identical candidate is the same evidence."""
+    if not record:
+        return None
+    return {k: record.get(k) for k in EVIDENCE_IDENTITY if record.get(k) is not None}
+
 def review_signature(t, fp):
+    """The review stays valid while the contract, the source map and the accepted evidence
+    are what it was recorded against. A rerun that reproduces the same pass on the same
+    fingerprints does not owe a second review; a moved tree or a changed outcome does."""
     return digest({"contract": contract_digest(t), "source": fp,
                    "work": [{"id": w["id"], "status": w["status"], "removed": bool(w.get("removed"))} for w in t["work"]],
-                   "checks": [{"id": c["id"], "status": c["status"], "removed": bool(c.get("removed")), "receipt": c.get("receipt"), "red": c.get("red"), "baseline": c.get("baseline")} for c in t["checks"]],
+                   "checks": [{"id": c["id"], "status": c["status"], "removed": bool(c.get("removed")),
+                               "receipt": evidence_identity(c.get("receipt")), "red": evidence_identity(c.get("red")),
+                               "baseline": evidence_identity(c.get("baseline"))} for c in t["checks"]],
                    "findings": t["findings"], "blockers": t["blockers"], "uncertain": t["uncertain"]})
 
 def unresolved_findings(task_dir, t, fp):
@@ -279,7 +341,7 @@ def unresolved_findings(task_dir, t, fp):
                     reason = "fix needs explicit remediation work, checks and rationale"; break
                 if not all(work_ok(task_dir, t, get(t["work"], w), fp) for w in ws):
                     reason = "remediation work not currently verified"; break
-                if not all(accepted(task_dir, get(t["checks"], c), fp) for c in cs):
+                if not all(accepted(task_dir, get(t["checks"], c), fp, t["root"]) for c in cs):
                     reason = "remediation checks not currently accepted"; break
                 regressions = [get(t["checks"], c) for c in cs if get(t["checks"], c).get("regression")]
                 if not regressions or not all(red_ok(task_dir, c) for c in regressions):
@@ -309,7 +371,11 @@ def next_actions(task_dir, t, fp):
         if any(not work_ok(task_dir, t, get(t["work"], d), fp) for d in w["deps"]):
             continue
         if not work_ok(task_dir, t, w, fp):
-            action = "implement/verify" if w["status"] != "verified" else "reverify stale evidence"
+            owed = work_owed(task_dir, t, w, fp)
+            if w["status"] != "verified":
+                action = "implement/verify" + (f" (checks owed: {', '.join(owed)})" if owed else "")
+            else:
+                action = "rerun stale evidence: " + (", ".join(owed) or "no mapped check")
             if repeated_attempts(attempts.get(w["id"], [])):
                 action += "; equivalent attempts already failed here — change diagnostic strategy before retrying"
             result.append({"id": w["id"], "action": action})
@@ -357,12 +423,19 @@ def gate(task_dir, t, fp=None, require_review=True):
                            f"or record operator authority with req attest-only")
         for w in ws:
             if not work_ok(task_dir, t, w, fp):
-                reasons.append(f"{w['id']}: work/evidence not verified for current candidate")
+                owed = work_owed(task_dir, t, w, fp)
+                if w["status"] != "verified":
+                    reasons.append(f"{w['id']}: status {w['status']}, not verified" + (f"; checks owed: {', '.join(owed)}" if owed else ""))
+                elif owed:
+                    reasons.append(f"{w['id']}: verified, but evidence is not current for {', '.join(owed)}")
+                else:
+                    reasons.append(f"{w['id']}: verified with no mapped acceptance check")
             if any(not work_ok(task_dir, t, get(t["work"], d), fp) for d in w["deps"]):
                 reasons.append(f"{w['id']}: dependency is not currently verified")
         for c in cs:
-            if not accepted(task_dir, c, fp):
-                reasons.append(f"{c['id']}: {c['status']} or stale/missing evidence")
+            reason = acceptance_reason(task_dir, c, fp, t["root"])
+            if reason:
+                reasons.append(f"{c['id']}: {reason}")
             if c.get("regression") and not red_ok(task_dir, c):
                 reasons.append(f"{c['id']}: meaningful baseline evidence missing")
     for fid, reason in unresolved_findings(task_dir, t, fp).items():
@@ -384,5 +457,54 @@ def gate(task_dir, t, fp=None, require_review=True):
     actions = next_actions(task_dir, t, fp)
     blocked = bool([b for b in t["blockers"] if not b.get("resolved")])
     status = "COMPLETE" if not reasons else ("BLOCKED" if blocked and not actions else "ACTIVE")
+    review_owed = any(r.startswith("review:") for r in reasons)
     return {"status": status, "reasons": reasons, "next": actions, "source": fp,
-            "attestation": {"executed": executed_total, "self_attested": attested_total}}
+            "attestation": {"executed": executed_total, "self_attested": attested_total},
+            "summary": gate_summary(task_dir, t, fp, review_owed)}
+
+def gate_summary(task_dir, t, fp, review_owed):
+    """The gate's reasons grouped by cause, so twenty-five stale lines read as one fact
+    and the reader gets the command that discharges it."""
+    groups = {"accepted": [], "stale": [], "failed": [], "not_run": [], "unapproved": [], "legacy": [], "other": []}
+    for c in live(t["checks"]):
+        reason = acceptance_reason(task_dir, c, fp, t["root"])
+        if reason is None:
+            groups["legacy" if legacy_receipt(c) else "accepted"].append(c["id"])
+        elif reason == "not run":
+            groups["not_run"].append(c["id"])
+        elif reason.startswith("FAIL"):
+            groups["failed"].append(c["id"])
+        elif "approve" in reason:
+            groups["unapproved"].append(c["id"])
+        elif reason.startswith(("stale", "STALE", "receipt predates")):
+            groups["stale"].append(c["id"])
+        else:
+            groups["other"].append(c["id"])
+    rerun = groups["stale"] + groups["failed"] + groups["not_run"]
+    unverified = [w["id"] for w in live(t["work"]) if not work_ok(task_dir, t, w, fp)]
+    open_findings = sorted(unresolved_findings(task_dir, t, fp))
+    open_blockers = [b["id"] for b in t["blockers"] if not b.get("resolved")]
+    parts = []
+    if groups["stale"]:
+        parts.append(f"{len(groups['stale'])} check(s) stale")
+    if groups["failed"]:
+        parts.append(f"{len(groups['failed'])} check(s) failed")
+    if groups["not_run"]:
+        parts.append(f"{len(groups['not_run'])} check(s) not run")
+    if groups["unapproved"]:
+        parts.append(f"{len(groups['unapproved'])} check(s) need approval")
+    if groups["other"]:
+        parts.append(f"{len(groups['other'])} check(s) lack evidence")
+    if unverified and not rerun and not groups["unapproved"] and not groups["other"]:
+        parts.append(f"{len(unverified)} work item(s) not verified")
+    if open_findings:
+        parts.append(f"{len(open_findings)} finding(s) open")
+    if open_blockers:
+        parts.append(f"{len(open_blockers)} blocker(s) open")
+    if review_owed:
+        parts.append("final review owed")
+    headline = "; ".join(parts) or "all obligations satisfied"
+    return {"headline": headline, "checks": groups, "work_unverified": unverified,
+            "findings_open": open_findings, "blockers_open": open_blockers,
+            "review": "owed" if review_owed else "current",
+            "rerun": ("dmd run " + " ".join(rerun)) if rerun else None}

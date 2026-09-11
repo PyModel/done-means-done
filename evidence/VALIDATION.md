@@ -60,3 +60,14 @@ Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).
 | Trigger | One session running integration checks from linked worktrees while another session edited the shared checkout: sixteen green runs invalidated three times, `FAIL` indistinguishable from "candidate moved", a variable-held `dmd` string breaking under zsh, and a manual `ps` proof for `recover-run` |
 
 Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).
+
+## 0.5.1 upgrade-report verification
+
+| Check | Result |
+|---|---|
+| `tests/test_candidates.py` ReasonCase (12 tests): a pre-0.5.0 worktree receipt accepted after the upgrade and labelled in the report, stale with the root and saying why, rebound on rerun; every gate reason naming its cause; the `summary` grouping with the exact rerun command; `work set --status verified` naming the refusing check; the Stop hook and the SessionStart hook repeating the headline and rerun command; SessionStart pointing a resuming session at `references/recovery.md` and `dmd reconcile`; `run` start/finish events on stderr with stdout rows unchanged; `gate --brief` / `next --brief` replacing the source map with its digest; a review surviving an identical-candidate rerun and reopening on a tree change; every subcommand carrying help text | All pass |
+| `tests/test_model.py`: review survives a receipt with a new timestamp, duration and log; reopens on a changed source or a changed observation | All pass |
+| `tests/test_adoption.py` (3 new): `--link-bin` previews without touching disk, installs a symlink that runs `dmd --version`, records it in the manifest and removes it on `--remove`; `--no-hooks` leaves `settings.json` absent; a foreign file or foreign symlink at the link path is refused unchanged | All pass; full suite 246 tests, [transcript](tests-final.log) |
+| Trigger | A live sixteen-check task with four linked worktrees upgraded from 0.4.1 to 0.5.0: every green went "stale" with no tree changed, the Stop hook gave no reason, twenty-five per-item lines hid one cause, `PASS or stale/missing` read as PASS, the `dmd()` function had to be redefined in every tool call, long checks were indistinguishable from hangs, the resume hook pointed at the full SKILL.md, and an identical rerun invalidated the final review |
+
+Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).

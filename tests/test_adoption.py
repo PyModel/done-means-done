@@ -88,6 +88,24 @@ class AdoptionCase(unittest.TestCase):
         d['hooks']['Stop'].append({'hooks':[{'type':'command','command':foreign}]}); self.settings.write_text(json.dumps(d))
         self.install('--remove','--apply'); d = json.loads(self.settings.read_text())
         self.assertEqual(d['hooks']['Stop'][0]['hooks'][0]['command'], foreign)
+    def test_link_bin_previews_then_installs_a_path_shim_and_removes_it(self):
+        bin_dir = self.home / 'bin'
+        p = self.install('--link-bin', str(bin_dir)); self.assertEqual(json.loads(p.stdout)['bin_link'], str(bin_dir / 'dmd')); self.assertFalse(bin_dir.exists())
+        self.install('--link-bin', str(bin_dir), '--apply'); link = bin_dir / 'dmd'
+        self.assertTrue(link.is_symlink()); self.assertEqual(os.readlink(link), str(ROOT / 'bin/dmd'))
+        r = subprocess.run([str(link), '--version'], capture_output=True, text=True, timeout=15); self.assertEqual(r.stdout.strip(), __import__('dmdlib').__version__)
+        manifest = next((self.state / 'installations').glob('*.json')); self.assertEqual(json.loads(manifest.read_text())['bin_link'], str(link))
+        self.install('--remove', '--apply'); self.assertFalse(link.exists()); self.assertFalse(link.is_symlink())
+    def test_link_bin_alone_leaves_settings_untouched(self):
+        bin_dir = self.home / 'bin'; self.install('--link-bin', str(bin_dir), '--no-hooks', '--apply')
+        self.assertTrue((bin_dir / 'dmd').is_symlink()); self.assertFalse(self.settings.exists())
+        self.install('--no-hooks', code=2)
+    def test_link_bin_refuses_a_foreign_file_or_link(self):
+        bin_dir = self.home / 'bin'; bin_dir.mkdir(); (bin_dir / 'dmd').write_text('#!/bin/sh\n')
+        p = self.install('--link-bin', str(bin_dir), '--apply', code=2); self.assertIn('not a symlink', p.stderr)
+        (bin_dir / 'dmd').unlink(); os.symlink(self.home / 'elsewhere', bin_dir / 'dmd')
+        p = self.install('--link-bin', str(bin_dir), '--apply', code=2); self.assertIn('not a dmd runtime', p.stderr)
+        self.assertEqual(os.readlink(bin_dir / 'dmd'), str(self.home / 'elsewhere'))
     def test_migration_invalid_graph_leaves_active_task_unchanged(self):
         self.cli('init','-m','Existing obligation','--authority','operator invocation'); directory=locate(self.repo); before=(directory/'task.json').read_bytes()
         source=self.old(work_items=[{'id':'W-01','text':'broken graph','req':'R-01','status':'verified','deps':['W-99']}]); oldbytes=source.read_bytes()

@@ -24,12 +24,13 @@ test ! -e "$HOME/.claude/skills/done-means-done" && \
 Do not nest the new package inside an existing skill directory. Use an explicit backup/upgrade instead. Keep the installation path stable after hook registration because hook commands contain its absolute runtime path.
 
 ```bash
-export PATH="$HOME/.claude/skills/done-means-done/bin:$PATH"
+python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --link-bin              # preview: ~/.local/bin/dmd -> bin/dmd, plus hook registrations
+python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --link-bin --apply      # explicit settings change and PATH link
 dmd --version
-python3 "$HOME/.claude/skills/done-means-done/hooks/install.py"          # preview only
-python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --apply # explicit settings change
 dmd config --mode enforce
 ```
+
+`--link-bin [DIR]` symlinks `bin/dmd` into `DIR` (default `~/.local/bin`) so `dmd` resolves in every shell and every agent tool call without a per-command shell function. It refuses to replace a file or a foreign symlink at that path. `--link-bin --no-hooks` manages only the link and leaves `settings.json` alone; `--remove` removes the link it recorded along with the hook registrations. If `DIR` is not on `PATH`, the installer says so; `export PATH="$HOME/.local/bin:$PATH"` in the shell profile, or `export PATH="$HOME/.claude/skills/done-means-done/bin:$PATH"` to skip the link.
 
 The last command enables blocking; `observe` is the default. Inspect the resulting `.claude/settings.json`, then start a new host session. Invoke `/done-means-done` with the actual assignment. A current session needs `init --session ACTUAL_ID` or `bind-session ACTUAL_ID`; do not assume a shell variable supplies it.
 
@@ -79,7 +80,7 @@ To remove this installation's hook registrations:
 
 ```bash
 python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --remove
-python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --remove --apply
+python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --remove --apply   # hooks and the recorded PATH link
 ```
 
 Preserve private task records, evidence, saved handoffs and all source changes. To revert runtime files, remove its exact hooks first, restore the preserved old installation, and review the old settings individually. Do not overwrite unrelated settings changes with a whole backup. Schema-2 records are not downgraded in place; retain them and use original schema-1 files with the old runtime when necessary.

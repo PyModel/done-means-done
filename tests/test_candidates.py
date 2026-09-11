@@ -3,6 +3,7 @@ named STALE, a run list shares one fingerprint window, concurrent writers are re
 up front, named resources serialize across tasks, records can be listed one group at a
 time, and recovery says what it found."""
 import fcntl
+import argparse
 import json
 import os
 import subprocess
@@ -11,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from dmdlib.cli import main, locate, load_task
-from dmdlib.model import task_fingerprint, check_candidate, source_for
+from dmdlib.model import source_digest, task_fingerprint, check_candidate, source_for
 from dmdlib.source import snapshot, drift, recent_writes, candidate_root
 from test_runtime import DmdFixture
 
@@ -362,6 +363,146 @@ class ReviewHashCase(GitFixture):
         with patch("dmdlib.cli.task_fingerprint", wraps=real) as fp:
             self.cmd("check", "set", "--id", "A-02", "--status", "PASS", "--note", "seen it", "--evidence", str(self.review))
         self.assertEqual(fp.call_count, 1)
+
+
+
+
+class ReasonCase(GitFixture):
+    """0.5.1: a pre-0.5.0 worktree receipt survives the upgrade, every gate reason names
+    its cause, the gate groups them, the Stop hook repeats the headline, and a run reports
+    progress on stderr without disturbing the stdout rows."""
+    def legacy(self, cid):
+        from dmdlib.model import CHECK_FIELDS; from dmdlib.storage import digest
+        d = locate(self.repo); t = load_task(d)
+        c = next(x for x in t["checks"] if x["id"] == cid)
+        c.pop("candidate", None); c.pop("exclusive", None)
+        c["receipt"].pop("candidate"); c["receipt"].pop("head")
+        c["receipt"]["source"] = task_fingerprint(t)[str(self.repo.resolve())]  # 0.4.x bound every receipt to the task root
+        c["receipt"]["definition"] = digest({k: c.get(k) for k in CHECK_FIELDS})
+        (d / "task.json").write_text(json.dumps(t))
+        # Make the worktree differ from the root so their fingerprints cannot coincide.
+        (Path(c["cwd"]) / "notes.txt").write_text("worktree-only\n")
+
+    def test_legacy_worktree_receipt_is_still_accepted_after_the_upgrade(self):
+        other = self.linked_worktree(); self.setup_task()
+        cid = self.add_check(other); self.cmd("run", cid, *QUIET); self.legacy(cid)
+        g = json.loads(self.cmd("status", "--json")[0])["gate"]
+        self.assertFalse(any(r.startswith(cid + ":") for r in g["reasons"]), g["reasons"])
+        self.assertIn(cid, g["summary"]["checks"]["legacy"])
+        report, _ = self.cmd("report")
+        self.assertIn("receipt predates 0.5.0 candidate binding", report)
+        self.assertIn(f"rerun to bind it to {other}", report)
+
+    def test_legacy_receipt_goes_stale_with_the_root_and_says_why(self):
+        other = self.linked_worktree(); self.setup_task()
+        cid = self.add_check(other); self.cmd("run", cid, *QUIET); self.legacy(cid)
+        (self.repo / "subject.py").write_text("VALUE = 43\n")
+        g = json.loads(self.cmd("status", "--json")[0])["gate"]
+        line = next(r for r in g["reasons"] if r.startswith(cid + ":"))
+        self.assertIn("predates 0.5.0", line); self.assertIn(str(other), line)
+        self.assertIn(cid, g["summary"]["checks"]["stale"])
+
+    def test_rerun_rebinds_a_legacy_receipt_to_its_worktree(self):
+        other = self.linked_worktree(); self.setup_task()
+        cid = self.add_check(other); self.cmd("run", cid, *QUIET); self.legacy(cid)
+        self.cmd("approve", cid, "--note", "re-inspected after the upgrade"); self.cmd("run", cid, *QUIET)
+        c = next(x for x in load_task(locate(self.repo))["checks"] if x["id"] == cid)
+        self.assertEqual(c["receipt"]["candidate"], str(other))
+        g = json.loads(self.cmd("status", "--json")[0])["gate"]
+        self.assertIn(cid, g["summary"]["checks"]["accepted"]); self.assertNotIn(cid, g["summary"]["checks"]["legacy"])
+
+    def test_every_reason_names_its_cause_and_the_summary_groups_them(self):
+        other = self.linked_worktree(); self.setup_task()
+        cid = self.add_check(other)
+        g = json.loads(self.cmd("gate", code=1)[0])
+        self.assertIn("A-01: not run", g["reasons"]); self.assertIn(f"{cid}: not run", g["reasons"])
+        self.assertEqual(g["summary"]["checks"]["not_run"], ["A-01", cid])
+        self.assertEqual(g["summary"]["rerun"], f"dmd run A-01 {cid}")
+        self.assertIn("2 check(s) not run", g["summary"]["headline"])
+        self.cmd("run", "A-01", cid, *QUIET)
+        (other / "subject.py").write_text("VALUE = 43\n")
+        g = json.loads(self.cmd("gate", code=1)[0])
+        line = next(r for r in g["reasons"] if r.startswith(cid + ":"))
+        self.assertTrue(line.startswith(f"{cid}: stale: {other} changed since the receipt (tested @ "), line)
+        self.assertEqual(g["summary"]["checks"]["stale"], [cid]); self.assertEqual(g["summary"]["checks"]["accepted"], ["A-01"])
+        self.assertEqual(g["summary"]["rerun"], f"dmd run {cid}"); self.assertEqual(g["summary"]["review"], "owed")
+        self.assertIn("1 check(s) stale", g["summary"]["headline"]); self.assertIn("final review owed", g["summary"]["headline"])
+        self.cmd("check", "edit", "--id", cid, "--expect", "verifies VALUE again")  # an edit resets the receipt
+        g = json.loads(self.cmd("gate", code=1)[0])
+        self.assertIn(f"{cid}: not run", g["reasons"]); self.assertEqual(g["summary"]["rerun"], f"dmd run {cid}")
+
+    def test_failed_check_reason_and_verified_work_reason(self):
+        self.setup_task(command='python3 -c "print(123)"')
+        self.cmd("run", "A-01", *QUIET, code=1)
+        g = json.loads(self.cmd("gate", code=1)[0])
+        self.assertIn("A-01: FAIL: exit or match failed; fix and rerun", g["reasons"])
+        self.assertIn("W-01: status todo, not verified; checks owed: A-01", g["reasons"])
+        self.assertEqual(g["summary"]["checks"]["failed"], ["A-01"])
+        _, err = self.cmd("work", "set", "--id", "W-01", "--status", "verified", code=2)
+        self.assertIn("A-01: FAIL", err)
+
+    def test_verified_work_with_stale_evidence_names_the_checks(self):
+        self.setup_task(); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
+        (self.repo / "subject.py").write_text("VALUE = 43\n")
+        g = json.loads(self.cmd("gate", code=1)[0])
+        self.assertIn("W-01: verified, but evidence is not current for A-01", g["reasons"])
+        self.assertEqual([x["action"] for x in g["next"] if x["id"] == "W-01"], ["rerun stale evidence: A-01"])
+        self.assertEqual(g["summary"]["work_unverified"], ["W-01"])
+
+    def test_stop_hook_repeats_the_headline_and_rerun_command(self):
+        self.setup_task(); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
+        (self.repo / "subject.py").write_text("VALUE = 43\n")
+        out, _ = self.cmd("hook", "stop", stdin=self.payload())
+        message = json.loads(out)["systemMessage"]
+        self.assertIn("1 check(s) stale", message); self.assertIn("Rerun: dmd run A-01", message); self.assertIn("A-01: stale:", message)
+        self.cmd("config", "--mode", "enforce")
+        out, _ = self.cmd("hook", "stop", stdin=self.payload())
+        self.assertIn("Rerun: dmd run A-01", json.loads(out)["reason"])
+
+    def test_run_reports_progress_on_stderr_and_keeps_stdout_rows(self):
+        self.setup_task()
+        out, err = self.cmd("run", "A-01", *QUIET)
+        rows = [json.loads(line) for line in out.splitlines()]
+        self.assertEqual([r["check"] for r in rows], ["A-01"]); self.assertEqual(rows[0]["result"], "PASS")
+        events = [json.loads(line) for line in err.splitlines() if line.startswith("{")]
+        self.assertEqual([(e["check"], e["event"]) for e in events], [("A-01", "start"), ("A-01", "finish")])
+        self.assertEqual(events[0]["candidate"], str(self.repo.resolve())); self.assertEqual(events[1]["exit"], 0)
+
+    def test_session_start_tells_a_resuming_session_what_to_read_and_what_is_owed(self):
+        self.setup_task(); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
+        (self.repo / "subject.py").write_text("VALUE = 43\n")
+        out, _ = self.cmd("hook", "session-start", stdin=self.payload())
+        text = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("references/recovery.md", text); self.assertIn("dmd reconcile", text)
+        self.assertIn("Read the full SKILL.md only to initialise a new task", text)
+        self.assertIn("1 check(s) stale", text); self.assertIn("Rerun: dmd run A-01", text)
+
+    def test_brief_gate_replaces_the_source_map_with_a_digest(self):
+        other = self.linked_worktree(); self.setup_task(); self.add_check(other)
+        full = json.loads(self.cmd("gate", code=1)[0]); brief = json.loads(self.cmd("gate", "--brief", code=1)[0])
+        self.assertEqual(len(full["source"]), 2); self.assertNotIn("source", brief)
+        self.assertEqual(brief["candidates"], 2); self.assertEqual(brief["source_digest"], source_digest(full["source"]))
+        self.assertEqual(brief["summary"], full["summary"]); self.assertEqual(brief["reasons"], full["reasons"])
+        brief = json.loads(self.cmd("next", "--brief")[0]); self.assertNotIn("source", brief)
+
+    def test_review_survives_a_rerun_on_an_identical_candidate(self):
+        self.setup_task(); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
+        self.cmd("coverage", "assert", "--note", "mapped")
+        self.cmd("review", "--kind", "self", "--reviewer", "r", "--note", "n", "--evidence", str(self.review))
+        self.cmd("gate")
+        self.cmd("run", "A-01", *QUIET)  # same tree, same pass, new timestamp and log
+        self.assertEqual(json.loads(self.cmd("gate")[0])["summary"]["review"], "current")
+        (self.repo / "notes.txt").write_text("a tree change that keeps the check green\n"); self.cmd("run", "A-01", *QUIET)
+        g = json.loads(self.cmd("gate", code=1)[0])
+        self.assertEqual(g["summary"]["review"], "owed"); self.assertTrue(any(r.startswith("review:") for r in g["reasons"]))
+
+    def test_every_subcommand_has_help_text(self):
+        from dmdlib.cli import HELP, parser
+        names = [a.dest for a in parser()._subparsers._group_actions][0]
+        sub = next(a for a in parser()._actions if isinstance(a, argparse._SubParsersAction))
+        self.assertEqual(sorted(sub.choices), sorted(HELP)); self.assertTrue(all(HELP[k].strip() for k in HELP))
+        for action in sub._choices_actions:
+            self.assertEqual(action.help, HELP[action.dest])
 
 
 if __name__ == "__main__":
