@@ -22,12 +22,12 @@ def main():
     front = skill.split('---\n', 2)[1]
     assert re.search(r'^name: done-means-done$', front, re.M)
     assert re.search(r'^description: .{40,1024}$', front, re.M)
-    assert 'version: "0.5.1"' in front
+    assert 'version: "0.5.2"' in front
     assert len(skill.splitlines()) < 500
     assert '!`' not in skill, 'skill must not execute dynamic commands at load'
     assert 'allowed-tools:' not in front, 'no broad permission preapproval'
     source = json.loads((ROOT / 'SOURCE.json').read_text())
-    assert source['name'] == 'done-means-done' and source['version'] == '0.5.1'
+    assert source['name'] == 'done-means-done' and source['version'] == '0.5.2'
     assert len(source['inspected_commit']) == 40
     python_files = list(ROOT.rglob('*.py')) + [ROOT / 'bin/dmd']
     for path in python_files:

@@ -25,12 +25,16 @@ def git(root, *args):
         return None
     return p.stdout if p.returncode == 0 else None
 
+def git_root(path):
+    """Top-level directory of the checkout containing path, or None outside Git."""
+    top = git(path, "rev-parse", "--show-toplevel")
+    return Path(os.fsdecode(top).rstrip("\n")).resolve() if top else None
+
 def identity(cwd):
     cwd = Path(cwd).expanduser().resolve(strict=True)
     if not cwd.is_dir():
         raise DmdError("--cwd must be a directory")
-    top = git(cwd, "rev-parse", "--show-toplevel")
-    root = Path(os.fsdecode(top).rstrip("\n")).resolve() if top else cwd
+    root = git_root(cwd) or cwd
     common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
     project = digest(os.fsdecode(common).rstrip("\n") if common else str(root))[:24]
     return root, project, digest(str(root))[:24]

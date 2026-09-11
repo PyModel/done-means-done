@@ -193,6 +193,10 @@ test_zero_wait_fails_immediately_and_names_the_remedy (test_resilience.LockRetry
 test_finished_sibling_tasks_are_not_suggested (test_resilience.SiblingWorktreeCase.test_finished_sibling_tasks_are_not_suggested) ... ok
 test_no_active_task_names_the_sibling_worktree_task (test_resilience.SiblingWorktreeCase.test_no_active_task_names_the_sibling_worktree_task) ... ok
 test_plain_no_task_message_without_siblings (test_resilience.SiblingWorktreeCase.test_plain_no_task_message_without_siblings) ... ok
+test_bound_session_whose_cwd_moved_outside_the_checkout_is_named_not_crashed (test_resilience.StateOutsideCheckoutCase.test_bound_session_whose_cwd_moved_outside_the_checkout_is_named_not_crashed) ... ok
+test_cli_still_refuses_and_names_both_paths (test_resilience.StateOutsideCheckoutCase.test_cli_still_refuses_and_names_both_paths) ... ok
+test_hooks_are_silent_when_cwd_no_longer_exists (test_resilience.StateOutsideCheckoutCase.test_hooks_are_silent_when_cwd_no_longer_exists) ... ok
+test_hooks_are_silent_when_state_root_is_inside_a_non_git_cwd (test_resilience.StateOutsideCheckoutCase.test_hooks_are_silent_when_state_root_is_inside_a_non_git_cwd) ... ok
 test_actual_output_and_exit_capture (test_runtime.RunnerCase.test_actual_output_and_exit_capture) ... ok
 test_background_descendant_holding_pipes_times_out (test_runtime.RunnerCase.test_background_descendant_holding_pipes_times_out) ... ok
 test_cancellation_terminates_check (test_runtime.RunnerCase.test_cancellation_terminates_check) ... ok
@@ -247,7 +251,7 @@ test_watchdog_pauses_without_claiming_completion (test_runtime.RuntimeCase.test_
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 246 tests in 48.279s
+Ran 250 tests in 46.755s
 
 OK
-DMD_TESTS_PASS:246;skipped=0
+DMD_TESTS_PASS:250;skipped=0

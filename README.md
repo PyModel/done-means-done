@@ -4,7 +4,7 @@
 
 Agents stop early. They finish four items out of five, call a checkpoint a delivery, report a bug instead of fixing it, or mark a test green that never ran an assertion. This skill puts the obligations in a file on disk and refuses to call the work finished until the evidence says so.
 
-Version 0.5.1. The runtime is a single Python CLI, `dmd`, with no dependencies outside the standard library.
+Version 0.5.2. The runtime is a single Python CLI, `dmd`, with no dependencies outside the standard library.
 
 Start with [SKILL.md](SKILL.md) for the protocol the agent follows. [Adoption](references/adoption.md) covers installing, upgrading and rolling back. [Validation](evidence/VALIDATION.md) says what was actually run, and [remediations](evidence/REMEDIATIONS.md) lists the defects found and fixed along the way.
 

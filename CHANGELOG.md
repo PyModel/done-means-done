@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 — 2026-09-11
+
+One item from a Claude Code session started in the home directory.
+
+`SessionStart:startup hook error … dmd: DMD_STATE must remain outside the project being verified`. A hook receives the host's cwd; outside any Git checkout the cwd itself is the project root, and from the home directory that root contains the default state root, `~/.local/state/done-means-done`. The containment guard exists so a verified tree never fingerprints its own evidence, and it is still correct for `init` and `run`. It was wrong as a hook outcome: no task can exist for such a tree, so there is nothing to select. The four hooks now resolve the cwd through one lookup that treats a state-inside-root refusal, a deleted cwd, or a cwd that is not a directory as "no task here" and exit 0 with no output. A session already bound to a task whose cwd cannot hold it still says `session binding does not belong to this worktree`.
+
+The CLI refusal now names both paths, says when the cwd was treated as the project root because it is not a Git checkout, and tells the operator to run inside the checkout or move `DMD_STATE`.
+
 ## 0.5.1 — 2026-09-11
 
 Nine items from upgrading a live sixteen-check task with four linked worktrees from 0.4.1 to 0.5.0.

@@ -1,5 +1,6 @@
 """Regressions for 0.4.1: lock contention is absorbed, hooks stay quiet under it, and a task
 recorded for a sibling worktree is named instead of hidden behind 'no active task'."""
+import contextlib
 import io
 import json
 import os
@@ -139,3 +140,44 @@ class SiblingWorktreeCase(DmdFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateOutsideCheckoutCase(DmdFixture):
+    """A session started outside any Git checkout (the home directory) makes the cwd the
+    project root, and the default state root then lies inside it. No task can exist there,
+    so hooks must say nothing and exit 0 instead of failing the host's SessionStart."""
+    def hook(self, event, cwd, code=0, session="session-home"):
+        out, err = io.StringIO(), io.StringIO()
+        payload = json.dumps({"cwd": str(cwd), "session_id": session, "stop_hook_active": False, "tool_name": "Edit"})
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), patch("sys.stdin", io.StringIO(payload)):
+            result = main(["--cwd", str(self.repo), "hook", event])
+        self.assertEqual(result, code, (event, result, out.getvalue(), err.getvalue()))
+        return out.getvalue(), err.getvalue()
+
+    def test_hooks_are_silent_when_state_root_is_inside_a_non_git_cwd(self):
+        # self.state lives under self.home, and self.home is not a checkout.
+        self.assertFalse((self.home / ".git").exists())
+        for event in ("session-start", "stop", "post-tool-use", "task-completed"):
+            out, err = self.hook(event, self.home)
+            self.assertEqual((out, err), ("", ""), event)
+
+    def test_hooks_are_silent_when_cwd_no_longer_exists(self):
+        gone = self.home / "removed"; gone.mkdir(); gone.rmdir()
+        out, err = self.hook("session-start", gone)
+        self.assertEqual((out, err), ("", ""))
+
+    def test_cli_still_refuses_and_names_both_paths(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            result = main(["--cwd", str(self.home), "init", "-m", "request", "--authority", "operator"])
+        self.assertEqual(result, 2)
+        self.assertIn(str(self.state), err.getvalue()); self.assertIn(str(self.home), err.getvalue())
+        self.assertIn("not a Git checkout", err.getvalue())
+        self.assertFalse((self.state / "v2").exists())
+
+    def test_bound_session_whose_cwd_moved_outside_the_checkout_is_named_not_crashed(self):
+        self.setup_task()
+        self.cmd("hook", "session-start", stdin=self.payload())
+        # The bound task is real; a cwd that cannot hold it is a mismatch worth naming, not a crash.
+        out, err = self.hook("stop", self.home, code=2, session="session-test")
+        self.assertIn("does not belong to this worktree", err); self.assertNotIn("Traceback", err)

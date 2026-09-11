@@ -4,7 +4,7 @@ description: Complete substantial authorized assignments with a persistent requi
 license: MIT
 compatibility: Python 3.10+ on macOS or Linux. Git is optional. Claude Code lifecycle hooks are optional and explicitly installed.
 metadata:
-  version: "0.5.1"
+  version: "0.5.2"
 ---
 
 # Done Means Done

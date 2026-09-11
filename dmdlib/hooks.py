@@ -22,8 +22,19 @@ def outstanding(g, limit=3):
     return line
 
 
+def lookup(cwd, task_id=None):
+    """Task directory for a hook's cwd, or None when no task can exist there: the cwd is
+    gone, or the state root lies inside it (a session started outside any checkout, e.g.
+    the home directory). Neither is a defect the host should see as a hook failure."""
+    from .cli import locate, StateInsideProject
+    try:
+        return locate(cwd, task_id)
+    except (StateInsideProject, FileNotFoundError, NotADirectoryError):
+        return None
+
+
 def handle(args):
-    from .cli import state_root, locate, load_task, bind_session, render
+    from .cli import state_root, load_task, bind_session, render
     root = state_root()
     config_path = root / "config.json"
     config = read_json(config_path) if config_path.exists() else {"mode": "observe", "max_no_progress": 6}
@@ -54,12 +65,11 @@ def handle(args):
             raise DmdError("invalid session task binding")
         task = load_task(d)
         # A session binding cannot bleed into a different project/worktree.
-        candidate = locate(cwd, task["task_id"])
-        if candidate != d:
+        if lookup(cwd, task["task_id"]) != d:
             raise DmdError("session binding does not belong to this worktree")
         directory = d
     elif args.event == "session-start":
-        directory = locate(cwd)
+        directory = lookup(cwd)
         if directory:
             bind_session(directory, session)
     if directory is None:

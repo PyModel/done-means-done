@@ -71,3 +71,7 @@ Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).
 | Trigger | A live sixteen-check task with four linked worktrees upgraded from 0.4.1 to 0.5.0: every green went "stale" with no tree changed, the Stop hook gave no reason, twenty-five per-item lines hid one cause, `PASS or stale/missing` read as PASS, the `dmd()` function had to be redefined in every tool call, long checks were indistinguishable from hangs, the resume hook pointed at the full SKILL.md, and an identical rerun invalidated the final review |
 
 Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).
+
+## 0.5.2 hook-outside-checkout verification
+
+Reproduced the reported `SessionStart:startup hook error … DMD_STATE must remain outside the project being verified` by feeding `dmd hook session-start` a payload whose `cwd` is the home directory (not a Git checkout) with the default state root. Exit was 2. After the fix all four hooks exit 0 with no output for that cwd and for a deleted cwd; a session bound to a real task still names the worktree mismatch; `init` from such a cwd still refuses and names both paths. Regression suite `tests/test_resilience.py::StateOutsideCheckoutCase` (4 tests); full run `DMD_TESTS_PASS:250` in `evidence/tests-final.log`.

@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
-from .source import candidate_root, drift, identity, recent_writes
+from .source import candidate_root, drift, git_root, identity, recent_writes
 from .model import (SCHEMA, FINDING_STATES, WORK_STATES, accepted, acceptance_reason, attested, check_candidate, check_definition, legacy_receipt,
                     contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, validation_errors, work_ok)
@@ -26,11 +26,17 @@ def state_root():
     # macOS, so an abspath would reject every state directory under the system temp root.
     return private_dir(Path(os.path.realpath(path)))
 
+class StateInsideProject(DmdError):
+    """The state root lies inside the tree that would be verified. No task can exist for
+    that tree by construction, so hooks treat it as 'no task here' rather than a failure."""
+
 def base_dir(cwd):
     root, project, worktree = identity(cwd)
     state = state_root()
     if state == root or state.is_relative_to(root):
-        raise DmdError("DMD_STATE must remain outside the project being verified")
+        why = ("" if git_root(root) else f"; {root} is not a Git checkout, so it is treated as the project root")
+        raise StateInsideProject(f"DMD_STATE ({state}) must remain outside the project being verified ({root}){why}. "
+                                 "Run dmd inside the project checkout, or point DMD_STATE elsewhere")
     return private_dir(state / "v2" / project / worktree), root
 
 def load_task(directory):
