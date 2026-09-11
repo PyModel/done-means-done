@@ -15,6 +15,47 @@ test_state_dir_under_a_symlinked_ancestor_installs (test_adoption.AdoptionCase.t
 test_uninstall_keeps_a_foreign_hook_that_merely_mentions_dmd (test_adoption.AdoptionCase.test_uninstall_keeps_a_foreign_hook_that_merely_mentions_dmd) ... ok
 test_uninstall_removes_only_exact_managed_commands (test_adoption.AdoptionCase.test_uninstall_removes_only_exact_managed_commands) ... ok
 test_uninstall_removes_orphaned_registrations_without_a_manifest (test_adoption.AdoptionCase.test_uninstall_removes_orphaned_registrations_without_a_manifest) ... ok
+test_all_refuses_before_running_when_one_is_unapproved (test_candidates.BatchCase.test_all_refuses_before_running_when_one_is_unapproved) ... ok
+test_all_runs_every_live_command_check (test_candidates.BatchCase.test_all_runs_every_live_command_check) ... ok
+test_batch_snapshots_each_candidate_once (test_candidates.BatchCase.test_batch_snapshots_each_candidate_once) ... ok
+test_ids_and_all_together_are_refused (test_candidates.BatchCase.test_ids_and_all_together_are_refused) ... ok
+test_named_list_runs_each_and_summarizes (test_candidates.BatchCase.test_named_list_runs_each_and_summarizes) ... ok
+test_no_ids_is_a_usage_error (test_candidates.BatchCase.test_no_ids_is_a_usage_error) ... ok
+test_one_window_makes_a_mid_sequence_move_stale_for_every_check (test_candidates.BatchCase.test_one_window_makes_a_mid_sequence_move_stale_for_every_check) ... ok
+test_running_record_names_the_whole_batch (test_candidates.BatchCase.test_running_record_names_the_whole_batch) ... ok
+test_candidate_root_outside_git_is_the_cwd (test_candidates.CandidateCase.test_candidate_root_outside_git_is_the_cwd) ... ok
+test_default_candidate_is_the_task_root_inside_it (test_candidates.CandidateCase.test_default_candidate_is_the_task_root_inside_it) ... ok
+test_explicit_candidate_is_recorded_and_part_of_the_definition (test_candidates.CandidateCase.test_explicit_candidate_is_recorded_and_part_of_the_definition) ... ok
+test_legacy_receipt_without_candidate_still_accepted_for_root_checks (test_candidates.CandidateCase.test_legacy_receipt_without_candidate_still_accepted_for_root_checks) ... ok
+test_receipt_records_candidate_and_head (test_candidates.CandidateCase.test_receipt_records_candidate_and_head) ... ok
+test_root_edit_does_not_invalidate_a_worktree_green (test_candidates.CandidateCase.test_root_edit_does_not_invalidate_a_worktree_green) ... ok
+test_source_for_falls_back_to_the_enclosing_candidate (test_candidates.CandidateCase.test_source_for_falls_back_to_the_enclosing_candidate) ... ok
+test_subdirectory_cwd_still_binds_to_the_task_root (test_candidates.CandidateCase.test_subdirectory_cwd_still_binds_to_the_task_root) ... ok
+test_worktree_cwd_binds_to_that_worktree (test_candidates.CandidateCase.test_worktree_cwd_binds_to_that_worktree) ... ok
+test_worktree_edit_invalidates_only_the_worktree_green (test_candidates.CandidateCase.test_worktree_edit_invalidates_only_the_worktree_green) ... ok
+test_a_held_resource_mid_batch_keeps_earlier_results (test_candidates.ExclusiveCase.test_a_held_resource_mid_batch_keeps_earlier_results) ... ok
+test_exclusive_tag_is_recorded_and_in_the_definition (test_candidates.ExclusiveCase.test_exclusive_tag_is_recorded_and_in_the_definition) ... ok
+test_held_resource_blocks_the_run_with_a_bounded_wait (test_candidates.ExclusiveCase.test_held_resource_blocks_the_run_with_a_bounded_wait) ... ok
+test_invalid_tag_is_refused (test_candidates.ExclusiveCase.test_invalid_tag_is_refused) ... ok
+test_group_lists (test_candidates.ListingCase.test_group_lists) ... ok
+test_listing_does_not_mutate_or_execute (test_candidates.ListingCase.test_listing_does_not_mutate_or_execute) ... ok
+test_status_only_renders_the_requested_sections (test_candidates.ListingCase.test_status_only_renders_the_requested_sections) ... ok
+test_another_tasks_live_run_on_the_same_candidate_is_refused (test_candidates.PreflightCase.test_another_tasks_live_run_on_the_same_candidate_is_refused) ... ok
+test_old_dirty_files_are_not_writers (test_candidates.PreflightCase.test_old_dirty_files_are_not_writers) ... ok
+test_recent_dirty_write_is_refused_with_the_path (test_candidates.PreflightCase.test_recent_dirty_write_is_refused_with_the_path) ... ok
+test_untracked_recent_files_count (test_candidates.PreflightCase.test_untracked_recent_files_count) ... ok
+test_zero_window_disables_the_check (test_candidates.PreflightCase.test_zero_window_disables_the_check) ... ok
+test_dead_runner_is_recovered_with_the_reason (test_candidates.RecoverCase.test_dead_runner_is_recovered_with_the_reason) ... ok
+test_live_runner_refuses_recovery (test_candidates.RecoverCase.test_live_runner_refuses_recovery) ... ok
+test_nothing_to_recover_is_an_error (test_candidates.RecoverCase.test_nothing_to_recover_is_an_error) ... ok
+test_other_host_runner_is_recovered_with_the_caveat (test_candidates.RecoverCase.test_other_host_runner_is_recovered_with_the_caveat) ... ok
+test_manual_pass_fingerprints_once (test_candidates.ReviewHashCase.test_manual_pass_fingerprints_once) ... ok
+test_review_fingerprints_once (test_candidates.ReviewHashCase.test_review_fingerprints_once) ... ok
+test_a_genuinely_failing_command_is_fail_not_stale (test_candidates.StaleCase.test_a_genuinely_failing_command_is_fail_not_stale) ... ok
+test_candidate_moved_is_reported_as_stale_with_drift (test_candidates.StaleCase.test_candidate_moved_is_reported_as_stale_with_drift) ... ok
+test_drift_lists_added_removed_and_modified (test_candidates.StaleCase.test_drift_lists_added_removed_and_modified) ... ok
+test_head_move_during_run_names_both_commits (test_candidates.StaleCase.test_head_move_during_run_names_both_commits) ... ok
+test_red_run_against_a_moving_candidate_is_red_stale (test_candidates.StaleCase.test_red_run_against_a_moving_candidate_is_red_stale) ... ok
 test_definition_change_is_named_distinctly (test_fixes.ApprovalDiagnosticsCase.test_definition_change_is_named_distinctly) ... ok
 test_environment_drift_is_named_and_re_approvable (test_fixes.ApprovalDiagnosticsCase.test_environment_drift_is_named_and_re_approvable) ... ok
 test_input_change_is_named_distinctly (test_fixes.ApprovalDiagnosticsCase.test_input_change_is_named_distinctly) ... ok
@@ -189,7 +230,7 @@ test_watchdog_pauses_without_claiming_completion (test_runtime.RuntimeCase.test_
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 188 tests in 64.295s
+Ran 229 tests in 43.266s
 
 OK
-DMD_TESTS_PASS:188;skipped=0
+DMD_TESTS_PASS:229;skipped=0

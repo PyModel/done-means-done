@@ -50,3 +50,13 @@ No remote repository was modified, no user host configuration was installed, no 
 | Trigger | A field report from another repository: an agent in a linked worktree saw "dmd has no active task in this worktree" with no pointer to the task in the main checkout, and hook/CLI overlap produced instant lock failures |
 
 Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).
+
+## 0.5.0 candidate-bound evidence verification
+
+| Check | Result |
+|---|---|
+| `tests/test_candidates.py` (41 tests): default candidate resolution (root, subdirectory, linked worktree, explicit `--candidate`), root edits leaving a worktree green accepted and vice versa, receipt candidate/HEAD, pre-0.5.0 records keeping their definition digest, `STALE`/`RED-STALE` with HEAD and changed paths, list runs with one snapshot window and a mid-sequence move staling every receipt, `--all` refusing on one unapproved check, quiet-window preflight (recent dirty file refused, old dirty file allowed, `0` disables, other task's live and dead runs named), `--exclusive` held-lock refusal with bounded wait and earlier list results kept, per-group `list` and `status --only`, `recover-run` refusing a live PID and reporting its findings, review and manual PASS fingerprinting once | All pass; full suite 229 tests, [transcript](tests-final.log) |
+| Fingerprint scheme | Old and new `fingerprint()` produce the same digest for the same fixture tree (Git repo with a tracked file, a symlink and a dirty edit) |
+| Trigger | One session running integration checks from linked worktrees while another session edited the shared checkout: sixteen green runs invalidated three times, `FAIL` indistinguishable from "candidate moved", a variable-held `dmd` string breaking under zsh, and a manual `ps` proof for `recover-run` |
+
+Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).

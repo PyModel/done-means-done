@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0 — 2026-09-11
+
+Evidence follows the tree that was tested. Nine items, all from one session of running integration checks in linked worktrees while another session edited the shared checkout.
+
+Every check now has a candidate: the tree its evidence is bound to. It defaults to the task root when the check runs inside it and to the checkout its cwd belongs to otherwise, and can be set with `--candidate`. Fingerprints are taken per candidate, a receipt is accepted while its own candidate is unchanged, and the receipt records the candidate path and its HEAD. Sixteen green worktree runs invalidated three times by edits elsewhere was the motivating case. Records written by 0.4.x keep their definition digests and receipts: the new fields join the definition only when set.
+
+A command that passed while its candidate or definition moved is reported as `STALE` (`RED-STALE`) rather than `FAIL`, with HEAD before and after and the changed paths, in the run output, the receipt and the report. Previously both cases printed `FAIL` and the difference lived in the evidence file and `git reflog`.
+
+`dmd run A-01 A-03` and `dmd run --all` run a list in one fingerprint window: every candidate is snapshotted once at the start and once at the end, every receipt binds to the start state, and a move in between names every affected receipt instead of quietly staling the earlier passes. The list is refused before anything runs if one check lacks a current approval.
+
+A preflight refuses to run against a candidate whose dirty files were modified within the last few seconds (`--quiet-window`, default 3 s) or that another task's recorded live run holds, naming the paths or the task and whether its runner is alive. It runs before the fingerprint, so nothing is recorded and no long integration run is burned.
+
+`check add --exclusive NAME` serializes checks that share a resource across tasks, worktrees and sessions on this machine, through per-tag locks under the state root taken in sorted order with a bounded wait (`--wait-exclusive`, default 600 s). A refusal is a clean exit, and results already taken in the list are kept.
+
+`req list`, `work list`, `check list`, `finding list` and `blocker list` print one group; `status --only SECTION` renders one report section.
+
+`recover-run` inspects the stranded run: it refuses while the runner PID is alive on this host and otherwise prints what it found and why the proof was accepted, instead of leaving that proof to the operator's own `ps`. The running record now carries the PID, host and check list.
+
+The final review and a manual PASS fingerprint once. The second hash added a race window and no protection, since the review signature already binds to the source state and the next gate detects any edit.
+
+Documented the runtime as a shell function. `dmd="python3 /path/dmd"` is one word to zsh and fails silently; `dmd() { python3 /path/dmd "$@"; }` does not.
+
+Fingerprint bytes are unchanged; a task root's fingerprint under 0.5.0 equals its 0.4.x fingerprint. A disproved finding records a digest of the candidate map; disproofs recorded by 0.4.x stay valid while the root is unchanged.
+
 ## 0.4.1 — 2026-09-10
 
 Resilience under ordinary contention and clearer failure when the task is elsewhere.

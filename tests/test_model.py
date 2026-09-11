@@ -23,7 +23,9 @@ class ModelCase(unittest.TestCase):
                   "findings": [], "blockers": [], "uncertain": [], "sessions": [], "events": [], "running": None, "require_independent_review": False}
         self.fp = m.task_fingerprint(self.t)
         self.c = self.t["checks"][0]
-        self.c["receipt"] = {"kind": "command", "source": self.fp, "definition": digest(m.check_definition(self.c)), "artifact": self.art, "exit": 0, "matched": True, "failure": None}
+        # A receipt binds to the fingerprint of the tree the check tested, not the whole map.
+        self.src = m.source_for(self.fp, self.c)
+        self.c["receipt"] = {"kind": "command", "source": self.src, "definition": digest(m.check_definition(self.c)), "artifact": self.art, "exit": 0, "matched": True, "failure": None}
         self.seal()
     def seal(self):
         self.t["coverage"] = {"digest": m.contract_digest(self.t), "note": "fixture source mapping"}
@@ -41,12 +43,12 @@ class ModelCase(unittest.TestCase):
     def test_clean_fixture_completes(self): self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_sole_attested_check_cannot_accept_a_requirement(self):
         self.c["method"] = "manual"; self.c["attested_because"] = "inherently observed by a person"
-        self.c["receipt"] = {"kind": "manual", "source": self.fp, "definition": m.digest(m.check_definition(self.c)),
+        self.c["receipt"] = {"kind": "manual", "source": self.src, "definition": m.digest(m.check_definition(self.c)),
                              "artifact": self.art, "note": "observed"}
         self.seal(); self.blocked("self-attested")
     def test_operator_authority_allows_an_attested_only_requirement(self):
         self.c["method"] = "manual"; self.c["attested_because"] = "inherently observed by a person"
-        self.c["receipt"] = {"kind": "manual", "source": self.fp, "definition": m.digest(m.check_definition(self.c)),
+        self.c["receipt"] = {"kind": "manual", "source": self.src, "definition": m.digest(m.check_definition(self.c)),
                              "artifact": self.art, "note": "observed"}
         self.t["requirements"][0]["attest_only"] = True
         self.t["requirements"][0]["attest_only_authority"] = "operator accepted manual acceptance"
@@ -116,13 +118,13 @@ class ModelCase(unittest.TestCase):
     def test_fixed_unverified_finding_blocks(self): self.finding(status="fixed-unverified"); self.seal(); self.blocked("F-01")
     def test_logged_only_disposition_invalid(self): self.finding(status="logged-only"); self.blocked("invalid finding")
     def test_fixed_finding_without_regression_blocks(self): self.finding(status="fixed-verified", work=["W-01"], checks=["A-01"], note="fixed"); self.seal(); self.blocked("regression")
-    def test_disproved_needs_artifact(self): self.finding(status="disproved", note="not a bug", source=self.fp); self.seal(); self.blocked("disproof")
-    def test_disproved_with_current_evidence_accepted(self): self.finding(status="disproved", note="proved invariant", source=self.fp, artifact=self.art); self.seal(); self.assertEqual(self.gate()["status"], "COMPLETE")
+    def test_disproved_needs_artifact(self): self.finding(status="disproved", note="not a bug", source=m.source_digest(self.fp)); self.seal(); self.blocked("disproof")
+    def test_disproved_with_current_evidence_accepted(self): self.finding(status="disproved", note="proved invariant", source=m.source_digest(self.fp), artifact=self.art); self.seal(); self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_disproof_source_change_reopens(self): self.finding(status="disproved", note="proved invariant", source="old", artifact=self.art); self.seal(); self.blocked("disproof")
     def test_duplicate_missing_target_invalid(self): self.finding(status="duplicate", duplicate="F-99", note="same defect"); self.blocked("canonical")
     def test_duplicate_cycle_blocks(self): self.finding(status="duplicate", duplicate="F-01", note="same defect"); self.seal(); self.blocked("cycle")
     def test_long_duplicate_chain_no_recursion(self):
-        self.finding(status="disproved", note="proved invariant", source=self.fp, artifact=self.art)
+        self.finding(status="disproved", note="proved invariant", source=m.source_digest(self.fp), artifact=self.art)
         for n in range(2, 1502): self.finding(id=f"F-{n:02d}", status="duplicate", duplicate=f"F-{n-1:02d}", note="same observation")
         self.seal(); self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_regression_requires_meaningful_baseline(self):

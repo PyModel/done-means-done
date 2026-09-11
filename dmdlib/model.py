@@ -4,13 +4,16 @@ import re
 from collections import deque
 from pathlib import Path
 from .storage import DmdError, digest, evidence_ok
-from .source import fingerprint
+from .source import snapshot
 
 SCHEMA = 2
 TASK_STATES = {"ACTIVE", "PAUSED", "BLOCKED", "CANCELLED", "COMPLETE"}
 WORK_STATES = {"todo", "doing", "implemented", "verified"}
 FINDING_STATES = {"suspected", "confirmed", "fixed-unverified", "fixed-verified", "disproved", "duplicate"}
 CHECK_FIELDS = ("id", "req", "work", "method", "command", "cwd", "expect", "match", "timeout", "max_output", "inputs", "regression", "red_match", "red_exit", "attested_because")
+# Added in 0.5.0. Part of the definition only when set, so a record written by an earlier
+# release keeps its definition digest, approvals and receipts across the upgrade.
+OPTIONAL_CHECK_FIELDS = ("candidate", "exclusive")
 # Only a command check produces machine-verifiable acceptance. Every other method is an
 # agent or operator attestation: recorded, rendered and counted as such, never disguised.
 ATTESTED_METHODS = ("manual", "review", "browser")
@@ -32,7 +35,36 @@ def new_id(items, prefix):
     return f"{prefix}-{max([int(x['id'].split('-')[1]) for x in items] or [0]) + 1:02d}"
 
 def check_definition(c):
-    return {key: c.get(key) for key in CHECK_FIELDS}
+    definition = {key: c.get(key) for key in CHECK_FIELDS}
+    for key in OPTIONAL_CHECK_FIELDS:
+        if c.get(key):
+            definition[key] = c[key]
+    return definition
+
+def check_candidate(c, root=None):
+    """The tree a check tests. Explicit `candidate` wins; a legacy check without one tests
+    the task root when its cwd lies inside it, otherwise its own cwd."""
+    if c.get("candidate"):
+        return c["candidate"]
+    cwd = Path(c["cwd"])
+    if root is not None:
+        root = Path(root)
+        if cwd == root or root in cwd.parents:
+            return str(root)
+    return str(cwd)
+
+def source_for(fps, c):
+    """The fingerprint a check's receipt must match: its candidate's entry, or the nearest
+    enclosing candidate when a legacy check names a subdirectory."""
+    if not isinstance(fps, dict):
+        return fps
+    cand = Path(check_candidate(c))
+    if str(cand) in fps:
+        return fps[str(cand)]
+    for parent in cand.parents:
+        if str(parent) in fps:
+            return fps[str(parent)]
+    return None
 
 def contract(task):
     return {
@@ -47,9 +79,26 @@ def contract(task):
 def contract_digest(task):
     return digest(contract(task))
 
+def task_candidates(task):
+    """Every tree the task's evidence is bound to, with the declared inputs of the checks
+    that test it. The task root is always present."""
+    root = str(Path(task["root"]))
+    found = {root: set()}
+    for c in live(task["checks"]):
+        found.setdefault(check_candidate(c, root), set()).update(c.get("inputs", []))
+    return {path: sorted(inputs) for path, inputs in found.items()}
+
+def task_snapshot(task):
+    return {path: snapshot(Path(path), inputs) for path, inputs in task_candidates(task).items()}
+
 def task_fingerprint(task):
-    inputs = [p for c in live(task["checks"]) for p in c.get("inputs", [])]
-    return fingerprint(Path(task["root"]), inputs)
+    """Per-candidate fingerprints keyed by absolute path. A check's evidence is bound to
+    the tree it actually tested, so an edit in a shared checkout does not invalidate green
+    runs taken against a worktree."""
+    return {path: snap["fingerprint"] for path, snap in task_snapshot(task).items()}
+
+def source_digest(fps):
+    return digest(fps)
 
 def validation_errors(t):
     errors = []
@@ -142,6 +191,11 @@ def validation_errors(t):
                 errors.append(f"{c['id']}: invalid output limit")
             if c.get("regression") and (not str(c.get("red_match", "")).strip() or not 1 <= c.get("red_exit", 0) <= 125):
                 errors.append(f"{c['id']}: regression requires an intentional failure match and exit 1..125")
+        if c.get("candidate") is not None and (not isinstance(c["candidate"], str) or not Path(c["candidate"]).is_absolute()):
+            errors.append(f"{c['id']}: candidate must be an absolute path")
+        tags = c.get("exclusive") or []
+        if not isinstance(tags, list) or any(not isinstance(x, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", x) for x in tags):
+            errors.append(f"{c['id']}: exclusive resource tags must be identifiers")
         if c.get("status") not in ("NOT_RUN", "PASS", "FAIL"):
             errors.append(f"{c['id']}: unsupported check state (required skips cannot pass)")
     for f in t["findings"]:
@@ -163,7 +217,7 @@ def accepted(task_dir, c, fp):
     if c.get("needs_review") or c.get("removed") or c.get("status") != "PASS":
         return False
     r = c.get("receipt") or {}
-    if r.get("source") != fp or r.get("definition") != digest(check_definition(c)) or not evidence_ok(task_dir, r.get("artifact")):
+    if r.get("source") != source_for(fp, c) or r.get("definition") != digest(check_definition(c)) or not evidence_ok(task_dir, r.get("artifact")):
         return False
     if c["method"] == "command":
         return r.get("kind") == "command" and r.get("exit") == 0 and r.get("matched") is True and r.get("failure") is None
@@ -215,7 +269,8 @@ def unresolved_findings(task_dir, t, fp):
                     reason = "duplicate needs rationale"; break
                 current = f.get("duplicate"); continue
             if status == "disproved":
-                if not f.get("note") or f.get("source") != fp or not evidence_ok(task_dir, f.get("artifact")):
+                bound = (source_digest(fp), fp.get(str(Path(t["root"])))) if isinstance(fp, dict) else (fp,)
+                if not f.get("note") or f.get("source") not in bound or not evidence_ok(task_dir, f.get("artifact")):
                     reason = "disproof needs evidence"
                 break
             if status == "fixed-verified":

@@ -4,7 +4,7 @@
 
 Agents stop early. They finish four items out of five, call a checkpoint a delivery, report a bug instead of fixing it, or mark a test green that never ran an assertion. This skill puts the obligations in a file on disk and refuses to call the work finished until the evidence says so.
 
-Version 0.4.1. The runtime is a single Python CLI, `dmd`, with no dependencies outside the standard library.
+Version 0.5.0. The runtime is a single Python CLI, `dmd`, with no dependencies outside the standard library.
 
 Start with [SKILL.md](SKILL.md) for the protocol the agent follows. [Adoption](references/adoption.md) covers installing, upgrading and rolling back. [Validation](evidence/VALIDATION.md) says what was actually run, and [remediations](evidence/REMEDIATIONS.md) lists the defects found and fixed along the way.
 
@@ -14,7 +14,7 @@ Three kinds of record carry the assignment. A requirement is something the opera
 
 `dmd gate` computes the verdict from those records and the evidence on disk. You ask for it; you never declare it. It needs current coverage against the original request, verified work, unstale evidence, every recorded finding resolved, a real failing baseline behind each regression claim, no open blockers or unknown external outcomes, and a final review of the integrated result.
 
-Evidence is bound to a hash of the actual file contents, including uncommitted and untracked files. Edit the code after a green run and that green goes stale. Yesterday's passing test proves nothing about today's candidate.
+Evidence is bound to a hash of the actual file contents, including uncommitted and untracked files, of the tree the check ran against: its candidate. A check that runs in a linked worktree is bound to that worktree, so a colleague editing the shared checkout does not invalidate it. Edit the candidate after a green run and that green goes stale, and the run that observed the move says so as `STALE`, with the commits and paths that changed. Yesterday's passing test proves nothing about today's candidate.
 
 `COMPLETE` is one of five results. The others are `ACTIVE`, `BLOCKED`, `PAUSED` and `CANCELLED`, and none of them is delivery.
 
@@ -77,7 +77,7 @@ Task state lives outside the project it verifies, under `~/.local/state/done-mea
 ## Verify it yourself
 
 ```bash
-python3 -B tests/run.py            # 178 tests
+python3 -B tests/run.py            # 229 tests
 python3 -B tests/validate_package.py
 python3 -B examples/local-demo.py
 ```

@@ -4,16 +4,20 @@ import argparse
 import contextlib
 import json
 import os
+import socket
 import sys
 import uuid
 from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
-from .source import identity
-from .model import (SCHEMA, FINDING_STATES, WORK_STATES, accepted, attested, check_definition, contract_digest,
-                    gate, get, live, new_id, repeated_attempts, review_signature, task_fingerprint,
-                    validation_errors, work_ok)
+from .source import candidate_root, drift, identity, recent_writes
+from .model import (SCHEMA, FINDING_STATES, WORK_STATES, accepted, attested, check_candidate, check_definition,
+                    contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
+                    source_for, task_fingerprint, task_snapshot, validation_errors, work_ok)
 from .runner import approval_drift, approval_parts, approval_signature, execute, SHELL
+
+QUIET_WINDOW_SECONDS = 3.0
+EXCLUSIVE_WAIT_SECONDS = 600.0
 
 
 def state_root():
@@ -180,6 +184,8 @@ def init(args):
 
 
 def req(args):
+    if args.action == "list":
+        return listing(args, "requirements")
     with edit(args, "req." + args.action) as (_, t):
         if args.action == "add":
             rid = new_id(t["requirements"], "R")
@@ -229,7 +235,33 @@ def supersede(t, record, kind, note):
     record["removed_at"] = now()
 
 
+def listing(args, group):
+    """Read-only view of one record group. `dmd status` is the whole ledger; close-out
+    usually needs one group."""
+    t = load_task(need(args))
+    rows = t[group]
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    for row in rows:
+        if group == "requirements":
+            print(f"{row['id']} [{row['status']}] {row['text']}")
+        elif group == "work":
+            state = "superseded" if row.get("removed") else row["status"]
+            deps = ", ".join(row.get("deps") or []) or "none"
+            print(f"{row['id']} [{state}] {row['text']} -> {row['req']}; deps: {deps}")
+        elif group == "checks":
+            state = "superseded" if row.get("removed") else row["status"]
+            print(f"{row['id']} [{state}] ({row['method']}) {row['expect']} -> {row['req']} / {', '.join(row['work'])}")
+        elif group == "findings":
+            print(f"{row['id']} [{row['status']}; {row['origin']}] {row['location']}: {row['text']}")
+        elif group == "blockers":
+            print(f"{row['id']} [{'resolved' if row['resolved'] else 'OPEN'}] {row['item']}: {row['text']}")
+
+
 def work(args):
+    if args.action == "list":
+        return listing(args, "work")
     with edit(args, "work." + args.action) as (directory, t):
         if args.action == "remove":
             w = get(t["work"], args.id)
@@ -272,6 +304,8 @@ def work(args):
 
 
 def check(args):
+    if args.action == "list":
+        return listing(args, "checks")
     with edit(args, "check." + args.action) as (directory, t):
         if args.regression and args.no_regression:
             raise DmdError("choose either --regression or --no-regression")
@@ -291,7 +325,8 @@ def check(args):
                      "expect": args.expect, "match": args.match, "timeout": 300 if args.timeout is None else args.timeout,
                      "max_output": 1048576 if args.max_output is None else args.max_output, "inputs": args.input or [],
                      "regression": bool(args.regression), "red_match": args.red_match, "red_exit": 1 if args.red_exit is None else args.red_exit,
-                     "attested_because": args.attested_because,
+                     "attested_because": args.attested_because, "candidate": args.candidate,
+                     "exclusive": args.exclusive or [],
                      "status": "NOT_RUN", "receipt": None, "red": None, "baseline": None}
                 t["checks"].append(c)
             else:
@@ -300,7 +335,8 @@ def check(args):
                 for flag, key in [("req", "req"), ("work", "work"), ("method", "method"), ("cmd", "command"),
                                   ("run_cwd", "cwd"), ("expect", "expect"), ("match", "match"), ("timeout", "timeout"),
                                   ("max_output", "max_output"), ("input", "inputs"), ("red_match", "red_match"),
-                                  ("red_exit", "red_exit"), ("attested_because", "attested_because")]:
+                                  ("red_exit", "red_exit"), ("attested_because", "attested_because"),
+                                  ("candidate", "candidate"), ("exclusive", "exclusive")]:
                     value = getattr(args, flag)
                     if value is not None:
                         c[key] = value
@@ -318,6 +354,18 @@ def check(args):
                 c.pop("needs_review", None)
             c["cwd"] = str(Path(c["cwd"]).expanduser().resolve(strict=True))
             c["inputs"] = [str((Path(c["cwd"]) / x).resolve(strict=True)) for x in c["inputs"]]
+            # The candidate is the tree this check's evidence is bound to. Default: the task
+            # root when the check runs inside it, else the checkout its cwd belongs to.
+            explicit = c.get("candidate") if args.action == "edit" and args.candidate is None else args.candidate
+            if explicit:
+                cand = Path(explicit).expanduser().resolve(strict=True)
+                if not cand.is_dir():
+                    raise DmdError("--candidate must be a directory")
+                c["candidate"] = str(cand)
+            else:
+                c["candidate"] = candidate_root(c["cwd"], t["root"])
+            for tag in c.get("exclusive") or []:
+                ident(tag)
             if attested(c) and not str(c.get("attested_because") or "").strip():
                 raise DmdError(f"--attested-because is required for a {c['method']} check: state why no "
                                "command can observe this behavior. Attested checks are reported as self-attested "
@@ -339,11 +387,10 @@ def check(args):
             require_text(args.note, "--note describing the observation")
             c["status"] = args.status
             if args.status == "PASS":
-                fp = task_fingerprint(t)
                 art = artifact_from_file(directory, args.evidence)
-                if task_fingerprint(t) != fp:
-                    raise DmdError("source changed while recording manual evidence")
-                c["receipt"] = {"kind": c["method"], "source": fp, "definition": digest(check_definition(c)),
+                fp = task_fingerprint(t)
+                c["receipt"] = {"kind": c["method"], "source": source_for(fp, c), "candidate": check_candidate(c, t["root"]),
+                                "definition": digest(check_definition(c)),
                                 "artifact": art, "note": args.note, "at": now()}
             else:
                 c["receipt"] = None
@@ -374,6 +421,87 @@ def preview(args):
                       "instruction": "Inspect the command and every called script. Approval is an operator-authorized action, not implied by a ledger."}, indent=2))
 
 
+def other_runs(task_id, candidates):
+    """Runs recorded by other tasks on this machine that touch one of our candidates. A
+    live one is a concurrent writer; a dead one is a leftover the other task must recover."""
+    found = []
+    for path in state_root().glob("v2/*/*/*/task.json"):
+        try:
+            t = read_json(path)
+        except (DmdError, OSError):
+            continue
+        r = t.get("running") if isinstance(t, dict) else None
+        if not r or t.get("task_id") == task_id:
+            continue
+        overlap = sorted(set(r.get("candidates") or []) & set(candidates))
+        if overlap:
+            found.append({"task_id": t.get("task_id"), "check": r.get("check"), "pid": r.get("pid"),
+                          "host": r.get("host"), "alive": pid_alive(r.get("pid"), r.get("host")), "candidates": overlap})
+    return found
+
+
+def pid_alive(pid, host):
+    """True/False for a PID on this host; None when it belongs to another host."""
+    if host != socket.gethostname() or not isinstance(pid, int):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def preflight(t, checks, window):
+    """Refuse a run that would test a tree someone is still writing. Cheaper than burning
+    an integration run and rejecting its receipt afterwards."""
+    candidates = sorted({check_candidate(c, t["root"]) for c in checks})
+    problems = []
+    for cand in candidates:
+        writes = recent_writes(cand, window)
+        if writes:
+            named = ", ".join(f"{w['path']} ({w['age_s']}s ago)" for w in writes[:5])
+            more = f" and {len(writes) - 5} more" if len(writes) > 5 else ""
+            problems.append(f"concurrent writer: {cand} has dirty files modified within {window:g}s: {named}{more}")
+    for r in other_runs(t["task_id"], candidates):
+        state = {True: "is alive", False: "is not alive; recover it there with dmd recover-run", None: "is on another host"}[r["alive"]]
+        problems.append(f"another dmd run ({r['task_id']} check {r['check']}, pid {r['pid']}) holds {', '.join(r['candidates'])}; that runner {state}")
+    if problems:
+        raise DmdError("; ".join(problems) + f". Wait for the writer to finish, or rerun with --quiet-window 0 to skip the dirty-file check")
+    return candidates
+
+
+@contextlib.contextmanager
+def exclusive(tags, wait):
+    """Serialize checks that share a named resource (a database, a port) across every task,
+    worktree and session on this machine. Tags are taken in sorted order so two checks
+    sharing several never deadlock."""
+    directory = private_dir(state_root() / "locks")
+    with contextlib.ExitStack() as stack:
+        for tag in sorted(set(tags)):
+            try:
+                stack.enter_context(lock(directory, ident(tag) + ".lock", wait=wait))
+            except DmdError as exc:
+                raise DmdError(f"exclusive resource '{tag}' is held by another check: {exc}") from exc
+        yield
+
+
+def select_checks(t, ids, everything):
+    if everything and ids:
+        raise DmdError("give check IDs or --all, not both")
+    if everything:
+        checks = [c for c in live(t["checks"]) if c["method"] == "command" and not c.get("needs_review")]
+        if not checks:
+            raise DmdError("no runnable command checks")
+        return checks
+    if not ids:
+        raise DmdError("name at least one check ID, or use --all")
+    if len(ids) != len(set(ids)):
+        raise DmdError("duplicate check IDs in one run")
+    return [get(t["checks"], cid) for cid in ids]
+
+
 def run(args):
     directory = need(args)
     with lock(directory, ".run.lock"):
@@ -383,27 +511,59 @@ def run(args):
                 raise DmdError("execution is suspended; operator-authorized activation required")
             if t.get("running"):
                 raise DmdError("previous run has an unknown outcome; use recover-run after inspecting it")
-            c = get(t["checks"], args.id)
-            if c["method"] != "command" or c.get("needs_review"):
-                raise DmdError("only fully authored command checks can run")
-            signature = approval_signature(c)
-            recorded = t["approvals"].get(c["id"]) or {}
-            if recorded.get("signature") != signature:
-                drift = approval_drift(c, recorded.get("parts"))
-                raise DmdError("check has no current inspected approval: " + "; ".join(drift) +
-                               f". Re-inspect and run: dmd approve {c['id']} --note '<what you inspected>'")
-            if args.red and (not c.get("regression") or not c.get("red_match")):
-                raise DmdError("--red requires a regression check with an intentional failure match")
-            fp = task_fingerprint(t)
-            definition = digest(check_definition(c))
+            checks = select_checks(t, args.ids, args.all)
+            plan = []
+            for c in checks:
+                if c["method"] != "command" or c.get("needs_review") or c.get("removed"):
+                    raise DmdError(f"{c['id']}: only fully authored, live command checks can run")
+                signature = approval_signature(c)
+                recorded = t["approvals"].get(c["id"]) or {}
+                if recorded.get("signature") != signature:
+                    drifted = approval_drift(c, recorded.get("parts"))
+                    raise DmdError(f"{c['id']} has no current inspected approval: " + "; ".join(drifted) +
+                                   f". Re-inspect and run: dmd approve {c['id']} --note '<what you inspected>'")
+                if args.red and (not c.get("regression") or not c.get("red_match")):
+                    raise DmdError(f"{c['id']}: --red requires a regression check with an intentional failure match")
+                plan.append((c, signature, digest(check_definition(c))))
+            window = QUIET_WINDOW_SECONDS if args.quiet_window is None else args.quiet_window
+            candidates = preflight(t, checks, window)
+            # One fingerprint window for the whole list: snapshot every candidate once here,
+            # once after the last check. Receipts bind to the start state; drift is diffed.
+            before = task_snapshot(t)
+            fps = {path: snap["fingerprint"] for path, snap in before.items()}
             token = uuid.uuid4().hex
-            t["running"] = {"token": token, "check": c["id"], "started": now(), "source": fp}
-            save(directory, t, "run.start", check=c["id"], red=args.red)
+            t["running"] = {"token": token, "checks": [c["id"] for c in checks], "check": checks[0]["id"],
+                            "started": now(), "source": fps, "candidates": candidates,
+                            "pid": os.getpid(), "host": socket.gethostname(), "red": bool(args.red)}
+            save(directory, t, "run.start", checks=[c["id"] for c in checks], red=args.red)
         def cancelled():
             current = load_task(directory)
             return current["state"] in ("PAUSED", "CANCELLED") or (current.get("running") or {}).get("token") != token
+        results = []
+        refused = None
         try:
-            result = execute(c, cancelled)
+            for index, (c, _, _) in enumerate(plan):
+                if index:
+                    with lock(directory):
+                        t = load_task(directory)
+                        if (t.get("running") or {}).get("token") == token:
+                            t["running"]["check"] = c["id"]
+                            save(directory, t, "run.next", check=c["id"])
+                wait = EXCLUSIVE_WAIT_SECONDS if args.wait_exclusive is None else args.wait_exclusive
+                try:
+                    holder = exclusive(c.get("exclusive") or [], wait)
+                    holder.__enter__()
+                except DmdError as exc:
+                    # Nothing ran for this check: a held resource is a clean refusal, not an
+                    # interrupted run. Earlier results in the list are kept.
+                    refused = f"{c['id']}: {exc}"
+                    break
+                try:
+                    results.append(execute(c, cancelled))
+                finally:
+                    holder.__exit__(None, None, None)
+                if results[-1]["failure"] == "CANCELLED":
+                    break
         except BaseException:
             # The supervisor has cleaned up its local process group. Preserve
             # interrupted evidence as unknown, never silently retry external effects.
@@ -411,44 +571,79 @@ def run(args):
                 t = load_task(directory)
                 if (t.get("running") or {}).get("token") == token:
                     t["running"]["interrupted"] = True
-                    save(directory, t, "run.interrupted", check=c["id"])
+                    save(directory, t, "run.interrupted", checks=[c["id"] for c, _, _ in plan], completed=len(results))
             raise
         with lock(directory):
             t = load_task(directory)
-            current = get(t["checks"], args.id)
-            changed = ((t.get("running") or {}).get("token") != token or
-                       digest(check_definition(current)) != definition or
-                       approval_signature(current) != signature or task_fingerprint(t) != fp or
-                       t["state"] in ("PAUSED", "CANCELLED"))
-            failure = result["failure"] or ("CANDIDATE_OR_DEFINITION_CHANGED" if changed else None)
-            match = c["red_match"] if args.red else c["match"]
-            matched = bool(match and match in result["output"])
-            expected_exit = c["red_exit"] if args.red else 0
-            success = result["exit"] == expected_exit and matched and failure is None
-            metadata = {k: v for k, v in result.items() if k != "output"}
-            art = evidence(directory, json.dumps({"check": args.id, "definition": check_definition(c),
-                                                 "source": fp, "started": (t.get("running") or {}).get("started"),
-                                                 "metadata": metadata}, indent=2) + "\n\n" + result["output"], "command")
-            receipt = {"kind": "command", "source": fp, "definition": definition, "artifact": art,
-                       "exit": result["exit"], "matched": matched, "failure": failure,
-                       "background_holders": result["background_holders"],
-                       "duration_s": result["duration_s"], "at": now()}
-            if args.red:
-                current["red"] = receipt if success else None
-                label = "RED-OK" if success else "RED-INVALID"
-            else:
-                current["status"] = "PASS" if success else "FAIL"
-                current["receipt"] = receipt
-                label = current["status"]
-            current.setdefault("runs", []).append({"at": now(), "red": args.red, "artifact": art, "result": label})
+            after = task_snapshot(t)
+            moved = {path: drift(before[path], after[path]) for path in before if path in after and before[path]["fingerprint"] != after[path]["fingerprint"]}
+            suspended = (t.get("running") or {}).get("token") != token or t["state"] in ("PAUSED", "CANCELLED")
+            summary = []
+            all_ok = True
+            for (c, signature, definition), result in zip(plan, results):
+                current = get(t["checks"], c["id"])
+                cand = check_candidate(c, t["root"])
+                candidate_drift = moved.get(cand) or next((moved[p] for p in moved if Path(p) in Path(cand).parents), None)
+                definition_changed = digest(check_definition(current)) != definition or approval_signature(current) != signature
+                changed = suspended or definition_changed or candidate_drift is not None
+                failure = result["failure"] or ("CANDIDATE_OR_DEFINITION_CHANGED" if changed else None)
+                match = c["red_match"] if args.red else c["match"]
+                matched = bool(match and match in result["output"])
+                expected_exit = c["red_exit"] if args.red else 0
+                ran_ok = result["exit"] == expected_exit and matched and result["failure"] is None
+                success = ran_ok and failure is None
+                # A command that passed against a tree that then moved is STALE, not FAILED:
+                # the receipt is rejected, and the reader learns what moved without opening
+                # the evidence file.
+                stale = ran_ok and changed
+                reason = None
+                if stale:
+                    reason = {"suspended": suspended, "definition_changed": definition_changed, "candidate": cand, "drift": candidate_drift}
+                metadata = {k: v for k, v in result.items() if k != "output"}
+                art = evidence(directory, json.dumps({"check": c["id"], "definition": check_definition(c),
+                                                     "candidate": cand, "head": before[cand]["head"] if cand in before else None,
+                                                     "source": fps.get(cand), "started": (t.get("running") or {}).get("started"),
+                                                     "metadata": metadata, "stale": reason}, indent=2) + "\n\n" + result["output"], "command")
+                receipt = {"kind": "command", "source": source_for(fps, c), "candidate": cand,
+                           "head": before[cand]["head"] if cand in before else None,
+                           "definition": definition, "artifact": art,
+                           "exit": result["exit"], "matched": matched, "failure": failure,
+                           "background_holders": result["background_holders"],
+                           "duration_s": result["duration_s"], "at": now()}
+                if stale:
+                    receipt["stale"] = reason
+                if args.red:
+                    current["red"] = receipt if success else None
+                    label = "RED-OK" if success else ("RED-STALE" if stale else "RED-INVALID")
+                else:
+                    current["status"] = "PASS" if success else "FAIL"
+                    current["receipt"] = receipt
+                    label = "PASS" if success else ("STALE" if stale else "FAIL")
+                current.setdefault("runs", []).append({"at": now(), "red": args.red, "artifact": art, "result": label})
+                all_ok = all_ok and success
+                row = {"check": c["id"], "result": label, "exit": result["exit"], "matched": matched,
+                       "failure": failure, "duration_s": result["duration_s"], "candidate": cand,
+                       "head": receipt["head"], "evidence": str(directory / art["path"])}
+                if stale:
+                    row["stale"] = reason
+                summary.append(row)
+            skipped = [c["id"] for c, _, _ in plan[len(results):]]
             t["running"] = None
-            save(directory, t, "run.finish", check=args.id, result=label, failure=failure)
-        print(json.dumps({"check": args.id, "result": label, "exit": result["exit"], "matched": matched,
-                          "failure": failure, "duration_s": result["duration_s"], "evidence": str(directory / art["path"])}))
-        return 0 if success else 1
+            save(directory, t, "run.finish", results=[(r["check"], r["result"]) for r in summary], skipped=skipped)
+        for row in summary:
+            print(json.dumps(row))
+        if len(plan) > 1 or skipped:
+            print(json.dumps({"batch": [r["check"] for r in summary], "skipped": skipped, "refused": refused,
+                              "results": {r["check"]: r["result"] for r in summary},
+                              "window": {"started": fps, "moved": moved}}))
+        if refused:
+            raise DmdError(refused + (f"; {len(summary)} earlier check(s) recorded" if summary else ""))
+        return 0 if all_ok and not skipped else 1
 
 
 def finding(args):
+    if args.action == "list":
+        return listing(args, "findings")
     with edit(args, "finding." + args.action) as (directory, t):
         if args.action == "add":
             fid = new_id(t["findings"], "F")
@@ -475,7 +670,7 @@ def finding(args):
                 require_text(args.note, "evidence-backed resolution --note")
             if f["status"] == "disproved":
                 f["artifact"] = artifact_from_file(directory, args.evidence)
-                f["source"] = task_fingerprint(t)
+                f["source"] = source_digest(task_fingerprint(t))
             if f["status"] == "duplicate":
                 target = require_text(args.duplicate, "--duplicate canonical finding ID")
                 get(t["findings"], target)
@@ -496,6 +691,8 @@ def finding(args):
 
 
 def blocker(args):
+    if args.action == "list":
+        return listing(args, "blockers")
     with edit(args, "blocker." + args.action) as (_, t):
         if args.action == "add":
             bid = new_id(t["blockers"], "B")
@@ -550,9 +747,9 @@ def review(args):
                  "outstanding": g["reasons"][:20]})
             rejected = g["reasons"]
         else:
+            # One fingerprint per review. The signature binds the review to this source
+            # state; a later gate detects any edit, so a second hash here adds only a race.
             artifact = artifact_from_file(directory, args.evidence)
-            if task_fingerprint(t) != fp:
-                raise DmdError("source changed during final review")
             t["review"] = {"signature": review_signature(t, fp), "kind": args.kind, "reviewer": require_text(args.reviewer, "--reviewer identity"),
                            "note": require_text(args.note, "final review --note"), "artifact": artifact, "at": now()}
             t.setdefault("review_log", []).append({"at": now(), "outcome": "accepted", "kind": args.kind,
@@ -562,25 +759,31 @@ def review(args):
     print("final review recorded")
 
 
-def render(directory, t, g):
+SECTIONS = ("assignment", "acceptance", "requirements", "work", "checks", "findings", "blockers", "attempts", "reviews", "owed", "next", "footer")
+
+def sections(directory, t, g):
+    """The report as named sections, so a reader can ask for one instead of the dump."""
     counts = g.get("attestation") or {}
-    lines = [f"# Done Means Done | {t['task_id']} | {g['status']}", "", "## Assignment", t["original_request"], "",
-             "## Acceptance basis",
-             f"- Accepted checks executed by dmd: {counts.get('executed', 0)}",
-             f"- Accepted checks SELF-ATTESTED by the agent (no command was run): {counts.get('self_attested', 0)}",
-             "", "## Requirements"]
+    out = {}
+    out["assignment"] = ["## Assignment", t["original_request"]]
+    out["acceptance"] = ["## Acceptance basis",
+                         f"- Accepted checks executed by dmd: {counts.get('executed', 0)}",
+                         f"- Accepted checks SELF-ATTESTED by the agent (no command was run): {counts.get('self_attested', 0)}"]
+    lines = ["## Requirements"]
     for r in t["requirements"]:
         line = f"- {r['id']} [{r['status']}] {r['text']} (source: {r['anchor']})"
         if r.get("attest_only"):
             line += " — attested-only by operator authority: " + r["attest_only_authority"]
         lines.append(line)
-    lines += ["", "## Work"]
+    out["requirements"] = lines
+    lines = ["## Work"]
     for w in t["work"]:
         state = "superseded" if w.get("removed") else w["status"]
         lines.append(f"- {w['id']} [{state}] {w['text']} -> {w['req']}; dependencies: {', '.join(w['deps']) or 'none'}")
         if w.get("removed"):
             lines.append("  Superseded: " + w["removed_reason"])
-    lines += ["", "## Checks"]
+    out["work"] = lines
+    lines = ["## Checks"]
     for c in t["checks"]:
         current = accepted(directory, c, g.get("source"))
         if c.get("removed"):
@@ -592,35 +795,65 @@ def render(directory, t, g):
             lines.append("  Attested because: " + c["attested_because"])
         if c.get("removed"):
             lines.append("  Superseded: " + c["removed_reason"])
+        if c.get("exclusive"):
+            lines.append("  Exclusive: " + ", ".join(c["exclusive"]))
         if c.get("receipt"):
-            lines.append("  Evidence: " + str(directory / c["receipt"]["artifact"]["path"]))
-            if c["receipt"].get("background_holders"):
+            r = c["receipt"]
+            lines.append("  Evidence: " + str(directory / r["artifact"]["path"]))
+            if r.get("candidate"):
+                lines.append(f"  Tested: {r['candidate']} @ {r.get('head') or 'no-head'}")
+            if r.get("stale"):
+                d = r["stale"].get("drift") or {}
+                why = "definition changed" if r["stale"].get("definition_changed") else "candidate moved"
+                moved = ", ".join(d.get("changed", [])[:5]) or "none listed"
+                lines.append(f"  STALE: {why}; HEAD {d.get('head_before') or 'no-head'} -> {d.get('head_after') or 'no-head'}; changed: {moved}")
+            if not current and c["status"] == "PASS" and not c.get("removed"):
+                lines.append("  Unverified because: the tested candidate no longer matches the current source")
+            if r.get("background_holders"):
                 lines.append("  Note: background processes still held the output pipes when this check finished.")
         if c.get("baseline"):
             lines.append("  Baseline limitation: " + c["baseline"]["reason"])
-    lines += ["", "## Findings (all severities and origins)"]
+    out["checks"] = lines
+    lines = ["## Findings (all severities and origins)"]
     for f in t["findings"]:
         lines.append(f"- {f['id']} [{f['status']}; {f['origin']}] {f['location']}: {f['text']}; {f.get('note', '')}")
-    lines += ["", "## Blockers and external outcomes"]
+    out["findings"] = lines
+    lines = ["## Blockers and external outcomes"]
     for b in t["blockers"]:
         lines.append(f"- {b['id']} [{'resolved' if b['resolved'] else 'OPEN'}] {b['text']}; unblock: {b['unblock']}; owner: {b['owner']}")
     for u in t["uncertain"]:
         lines.append(f"- {u['id']} [{'resolved' if u['resolved'] else 'UNKNOWN'}] {u['text']}")
+    out["blockers"] = lines
     repeats = {item: history for item, history in (t.get("attempts") or {}).items() if repeated_attempts(history)}
+    out["attempts"] = []
     if repeats:
-        lines += ["", "## Attempts requiring a different strategy"]
-        for item, history in sorted(repeats.items()):
-            lines.append(f"- {item}: {len(history)} recorded attempts; last strategy: {history[-1].get('strategy') or 'none recorded'}")
+        out["attempts"] = ["## Attempts requiring a different strategy"] + [
+            f"- {item}: {len(history)} recorded attempts; last strategy: {history[-1].get('strategy') or 'none recorded'}"
+            for item, history in sorted(repeats.items())]
     log = t.get("review_log") or []
+    out["reviews"] = []
     if log:
-        lines += ["", "## Review history"]
-        for entry in log:
-            lines.append(f"- {entry['at']} [{entry['outcome']}] {entry['kind']} review by {entry['reviewer']}: {entry['note']}")
-    lines += ["", "## Still owed"] + ["- " + x for x in g["reasons"]]
-    lines += ["", "## Next actions"] + [f"- {x['id']}: {x['action']}" for x in g["next"]]
-    lines += ["", "Review: " + ((t.get("review") or {}).get("kind", "not recorded")),
-              "Source: " + str(g.get("source", "not measured while suspended")),
-              "Evidence is local auditability, not tamper-proof attestation."]
+        out["reviews"] = ["## Review history"] + [
+            f"- {entry['at']} [{entry['outcome']}] {entry['kind']} review by {entry['reviewer']}: {entry['note']}" for entry in log]
+    out["owed"] = ["## Still owed"] + ["- " + x for x in g["reasons"]]
+    out["next"] = ["## Next actions"] + [f"- {x['id']}: {x['action']}" for x in g["next"]]
+    source = g.get("source")
+    if isinstance(source, dict):
+        source_lines = ["Source:"] + [f"- {path}: {fp}" for path, fp in sorted(source.items())]
+    else:
+        source_lines = ["Source: " + str(source or "not measured while suspended")]
+    out["footer"] = ["Review: " + ((t.get("review") or {}).get("kind", "not recorded")), *source_lines,
+                     "Evidence is local auditability, not tamper-proof attestation."]
+    return out
+
+
+def render(directory, t, g, only=None):
+    parts = sections(directory, t, g)
+    chosen = [name for name in SECTIONS if not only or name in only]
+    lines = [f"# Done Means Done | {t['task_id']} | {g['status']}"]
+    for name in chosen:
+        if parts[name]:
+            lines += [""] + parts[name]
     return "\n".join(lines) + "\n"
 
 
@@ -638,6 +871,8 @@ def inspect_task(args):
             atomic(directory / "handoff.md", text)
         if args.command == "report" and args.save:
             atomic(directory / "report.md", text)
+        if getattr(args, "only", None):
+            text = render(directory, t, g, only=set(args.only))
     if args.command == "status" and args.json:
         print(json.dumps({"task_dir": str(directory), "task": t, "gate": g}, indent=2))
     elif args.command in ("gate", "next"):
@@ -680,10 +915,28 @@ def other(args):
         elif args.command == "recover-run":
             # An OS-released flock proves the local runner is gone, not that an
             # external deployment or payment did/didn't happen. Require reconciliation.
-            with lock(directory, ".run.lock"):
-                require_text(args.proof, "--proof reconciling the interrupted operation")
+            r = t.get("running")
+            if not r:
+                raise DmdError("no interrupted run is recorded; nothing to recover")
+            require_text(args.proof, "--proof reconciling the interrupted operation")
+            with lock(directory, ".run.lock", wait=0):
+                alive = pid_alive(r.get("pid"), r.get("host"))
+                found = {"check": r.get("check"), "checks": r.get("checks") or [r.get("check")], "started": r.get("started"),
+                         "pid": r.get("pid"), "host": r.get("host"), "this_host": socket.gethostname(),
+                         "runner_alive": alive, "interrupted_flag": bool(r.get("interrupted")), "run_lock": "free"}
+                if alive is True:
+                    raise DmdError(f"runner pid {r.get('pid')} is still alive on this host; stop it or wait, do not recover over it: "
+                                   + json.dumps(found))
+                if alive is False:
+                    found["accepted_because"] = f"run lock was free and runner pid {r.get('pid')} no longer exists on this host"
+                elif r.get("pid") is None:
+                    found["accepted_because"] = "run lock was free; the record predates PID tracking, so liveness was not checkable"
+                else:
+                    found["accepted_because"] = f"run lock was free; the runner was on host {r.get('host')}, so its liveness was not checkable here"
+                found["external_effects"] = "not proven by this command; your --proof must reconcile them"
                 t["running"] = None
-                t.setdefault("recovery", []).append({"at": now(), "proof": args.proof})
+                t.setdefault("recovery", []).append({"at": now(), "proof": args.proof, "found": found})
+                print(json.dumps(found, indent=2))
 
 
 def configuration(args):
@@ -710,23 +963,23 @@ def parser():
     def command(name, fn):
         s = sub.add_parser(name); s.set_defaults(func=fn); return s
     s = command("init", init); s.add_argument("-m", "--message"); s.add_argument("--request-file"); s.add_argument("--authority", required=True); s.add_argument("--session"); s.add_argument("--new", action="store_true"); s.add_argument("--independent-review", action="store_true")
-    s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--authority")
-    s = command("work", work); s.add_argument("action", choices=["add", "set", "remove"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace")
-    s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove"])
-    for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence"]:
+    s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--authority"); s.add_argument("--json", action="store_true")
+    s = command("work", work); s.add_argument("action", choices=["add", "set", "remove", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace"); s.add_argument("--json", action="store_true")
+    s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"])
+    for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence", "candidate"]:
         s.add_argument("--" + flag)
-    s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because")
+    s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--exclusive", action="append"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because"); s.add_argument("--json", action="store_true")
     s = command("preview", preview); s.add_argument("id")
     s = command("approve", approve); s.add_argument("id"); s.add_argument("--note", required=True)
-    s = command("run", run); s.add_argument("id"); s.add_argument("--red", action="store_true")
-    s = command("finding", finding); s.add_argument("action", choices=["add", "set"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--location"); s.add_argument("--status", choices=sorted(FINDING_STATES)); s.add_argument("--origin", choices=["introduced", "pre-existing", "dependency", "unknown"]); s.add_argument("--note"); s.add_argument("--work", action="append"); s.add_argument("--check", action="append"); s.add_argument("--duplicate"); s.add_argument("--evidence")
-    s = command("blocker", blocker); s.add_argument("action", choices=["add", "clear"]); s.add_argument("text", nargs="?")
+    s = command("run", run); s.add_argument("ids", nargs="*"); s.add_argument("--all", action="store_true"); s.add_argument("--red", action="store_true"); s.add_argument("--quiet-window", type=float); s.add_argument("--wait-exclusive", type=float)
+    s = command("finding", finding); s.add_argument("action", choices=["add", "set", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--location"); s.add_argument("--status", choices=sorted(FINDING_STATES)); s.add_argument("--origin", choices=["introduced", "pre-existing", "dependency", "unknown"]); s.add_argument("--note"); s.add_argument("--work", action="append"); s.add_argument("--check", action="append"); s.add_argument("--duplicate"); s.add_argument("--evidence"); s.add_argument("--json", action="store_true")
+    s = command("blocker", blocker); s.add_argument("action", choices=["add", "clear", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--json", action="store_true")
     for flag in ["id", "item", "owner", "unblock", "proof"]: s.add_argument("--" + flag)
     s = command("uncertain", uncertain); s.add_argument("action", choices=["add", "resolve"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--proof")
     s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert"]); s.add_argument("--note")
     s = command("review", review); s.add_argument("--kind", choices=["self", "independent"], required=True); s.add_argument("--reviewer", required=True); s.add_argument("--note", required=True); s.add_argument("--evidence", required=True)
     for name in ["status", "next", "gate", "report", "handoff", "reconcile"]:
-        s = command(name, inspect_task); s.add_argument("--json", action="store_true"); s.add_argument("--save", action="store_true")
+        s = command(name, inspect_task); s.add_argument("--json", action="store_true"); s.add_argument("--save", action="store_true"); s.add_argument("--only", action="append", choices=SECTIONS)
     s = command("state", other); s.add_argument("status", choices=["ACTIVE", "PAUSED", "CANCELLED"]); s.add_argument("--reason", required=True); s.add_argument("--authority")
     s = command("amend", other); s.add_argument("text")
     s = command("attempt", other); s.add_argument("item"); s.add_argument("signature"); s.add_argument("--strategy")

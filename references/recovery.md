@@ -20,7 +20,7 @@ State changes persist as they happen. Generate a handoff before planned compacti
 
 Before a non-idempotent operation, record its identity and intended effect. An incomplete response creates an unknown outcome. Query the external service/receipt to determine whether it completed before retrying. Never assume a timeout equals cancellation.
 
-The check runner holds a local run lock separate from its short state lock, so cancellation can update the task while execution is active. Timeouts/cancellation terminate its local process group. A crash may leave an incomplete running record. `recover-run --proof ...` requires the local run lock to be released and a specific external-outcome reconciliation. It does not prove that another machine, remote job, or deployment is stopped.
+The check runner holds a local run lock separate from its short state lock, so cancellation can update the task while execution is active. Timeouts/cancellation terminate its local process group. A crash may leave an incomplete running record. `recover-run --proof ...` requires the local run lock to be released, refuses while the recorded runner PID is still alive on this host, prints what it found and why it accepted the proof, and still needs a specific external-outcome reconciliation. It does not prove that another machine, remote job, or deployment is stopped.
 
 ## Decomposed tasks
 

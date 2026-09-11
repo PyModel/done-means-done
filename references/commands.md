@@ -22,6 +22,7 @@ Paths are resolved on the current machine. Symlinked state and settings *directo
 | `amend TEXT` | Preserve an operator amendment; reconcile changed requirements afterward |
 | `coverage show` | Display the source request and obligation inventory without executing checks |
 | `coverage assert --note TEXT` | Attest source-to-inventory review against the current contract digest |
+| `req list`, `work list`, `check list`, `finding list`, `blocker list` (`--json`) | One record group, read-only, one line per record; `status --only work` renders one report section |
 
 `--authority` records the instruction; it does not authenticate a human. Never fabricate authority or use a new task to bypass the old assignment. Any missing mandatory requirement remains a review failure even when the structural gate is otherwise green.
 
@@ -41,11 +42,26 @@ Every work item requires a requirement. Every check requires an explicit work ma
 dmd check add --req R-01 --work W-01 --work W-02 \
   --cmd "python3 -B tests/check_behavior.py" --run-cwd /absolute/project \
   --expect "Intended behavioral assertions execute" --match "BEHAVIOR_PASS:4" \
-  --input tests/check_behavior.py --timeout 300 --max-output 1048576
+  --input tests/check_behavior.py --timeout 300 --max-output 1048576 \
+  --candidate /absolute/project --exclusive integration-db
 dmd preview A-01
 dmd approve A-01 --note "Inspected command and transitive scripts within authorized permissions"
 dmd run A-01
+dmd run A-01 A-03 A-04          # one fingerprint window for the list
+dmd run --all                   # every live, approved command check, in ledger order
+dmd run A-01 --quiet-window 0   # skip the concurrent-writer preflight
+dmd run A-01 --wait-exclusive 30
 ```
+
+`--candidate` names the tree the check's evidence is bound to. It defaults to the task root when `--run-cwd` lies inside it, otherwise to the Git checkout the cwd belongs to (a linked worktree, another repository), or the cwd itself outside Git. Each candidate is fingerprinted separately; a receipt is accepted while its own candidate is unchanged, so an edit in the shared checkout does not invalidate a green taken in a worktree. The receipt records the candidate path and its HEAD commit, and the report prints them as `Tested: <path> @ <sha>`.
+
+`--exclusive NAME` is repeatable and names a resource the check cannot share (a database, a port, a fixture directory). Two checks with the same tag never execute concurrently, across tasks, worktrees and sessions on this machine: the runner takes a lock under the state root per tag, in sorted order, waiting up to `--wait-exclusive` seconds (default 600) before refusing. A refusal is a clean exit 2, not an interrupted run; earlier results in the list are kept.
+
+Before executing, `run` refuses a candidate whose dirty or untracked files were modified within `--quiet-window` seconds (default 3; `0` disables) and a candidate that another task's recorded live run holds, naming the paths or the other task and whether its runner is alive. Nothing is recorded for a refused run.
+
+`run` with several IDs, or `--all`, snapshots every candidate once before the first check and once after the last. Every receipt binds to the start state. A candidate that moved in between makes every receipt on it `STALE`, and the trailing batch line lists what moved. A list is refused before anything runs if one check lacks a current approval. Interrupting a list loses the results not yet written; the run is recorded as interrupted for `recover-run`.
+
+A check whose command passed (expected exit, literal match, within bounds) while its candidate or definition moved is reported as `STALE` (`RED-STALE` for a red run) instead of `FAIL`. The row and the receipt carry `stale.drift`: HEAD before and after and up to 50 changed paths. The status stays `FAIL` and the receipt is not accepted.
 
 Only `--method command` produces machine-verified acceptance. `--method manual|review|browser` requires `--attested-because TEXT` saying why no command can observe the behavior; those checks are reported as `SELF-ATTESTED`, counted in `gate` output, and cannot alone accept a requirement without `req attest-only`.
 
@@ -129,7 +145,7 @@ dmd handoff
 
 Use `self` unless a genuinely separate reviewer performed the review. All other acceptance conditions must be ready before the final review can be recorded. Reports distinguish this attestation; the runtime does not authenticate reviewer identity.
 
-`gate` emits JSON and exits 0 only for COMPLETE, 1 for a valid unfinished/suspended assignment, and 2 for input/infrastructure errors. `run` exits 0 for an accepted green or intentional red, 1 for failed verification, and 2 for setup/approval errors. `next` emits JSON; `status --json` exposes state plus computed gate; `report --save` and `handoff` write generated views outside the project. `list` labels stored state, which may need current revalidation, and reports an unreadable record as its own row instead of failing the listing. Exit 3 means a defect in dmd itself, not a usage error: the task record was not advanced and the trace should be reported. A lock held by another `dmd` process is waited out with backoff for `DMD_LOCK_WAIT` seconds (default 5) before exit 2 names the wait; `no active task in this worktree` lists unfinished tasks of sibling worktrees when any exist.
+`gate` emits JSON and exits 0 only for COMPLETE, 1 for a valid unfinished/suspended assignment, and 2 for input/infrastructure errors. `run` exits 0 when every listed check is an accepted green or intentional red, 1 when any failed or went stale, and 2 for setup/approval/preflight/exclusive-resource errors. `next` emits JSON; `status --json` exposes state plus computed gate; `report --save` and `handoff` write generated views outside the project. `list` labels stored state, which may need current revalidation, and reports an unreadable record as its own row instead of failing the listing. Exit 3 means a defect in dmd itself, not a usage error: the task record was not advanced and the trace should be reported. A lock held by another `dmd` process is waited out with backoff for `DMD_LOCK_WAIT` seconds (default 5) before exit 2 names the wait; `no active task in this worktree` lists unfinished tasks of sibling worktrees when any exist.
 
 ```bash
 dmd state PAUSED --reason "Operator requested a pause"
@@ -140,7 +156,7 @@ dmd recover-run --proof "Local process is gone and external outcome was reconcil
 dmd attempt W-02 "Concrete failure signature" --strategy "Different experiment and expected information"
 ```
 
-The runner lock prevents clearing a live local check. Recovery proof must additionally reconcile any external effect. Arbitrary source writers and remote effects are not controlled by that lock.
+The runner lock prevents clearing a live local check. `recover-run` also checks the recorded runner PID: it refuses while that process is alive on this host, and otherwise prints the check, start time, PID, host, liveness, the interrupted flag, and the reason the proof was accepted; the record predating PID tracking or belonging to another host is named as not checkable. Recovery proof must additionally reconcile any external effect. Arbitrary source writers and remote effects are not controlled by that lock.
 
 ## Session hooks and migration
 

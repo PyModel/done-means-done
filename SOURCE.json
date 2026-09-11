@@ -1,10 +1,10 @@
 {
   "name": "done-means-done",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "source_repository": "https://github.com/PyModel/done-means-done",
   "inspected_commit": "bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2",
   "inspection_date": "2026-09-10",
   "license": "MIT",
   "copyright": "2026 PyModel contributors",
-  "implementation": "Consolidated protocol and newly integrated Python runtime based on the inspected source design. Not a byte-identical upstream checkout; baseline source was read through the GitHub connector. 0.4.0 additionally diverges from the inspected commit with locally reviewed defect fixes (acceptance-basis attestation, state-path canonicalization, background-holder execution, record supersession, history append, approval and listing diagnostics) that were not upstreamed. 0.4.1 adds bounded lock retry, tolerant bookkeeping hooks and sibling-worktree diagnostics. No remote repository writes performed."
+  "implementation": "Consolidated protocol and newly integrated Python runtime based on the inspected source design. Not a byte-identical upstream checkout; baseline source was read through the GitHub connector. 0.4.0 additionally diverges from the inspected commit with locally reviewed defect fixes (acceptance-basis attestation, state-path canonicalization, background-holder execution, record supersession, history append, approval and listing diagnostics) that were not upstreamed. 0.4.1 adds bounded lock retry, tolerant bookkeeping hooks and sibling-worktree diagnostics. 0.5.0 binds evidence to each check's own candidate tree, diffs drift into a STALE result, runs a check list in one fingerprint window, refuses concurrent writers before running, serializes named resources across tasks, adds per-group listing, and makes recovery inspect the runner. No remote repository writes performed."
 }

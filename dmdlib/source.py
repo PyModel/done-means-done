@@ -4,8 +4,19 @@ import hashlib
 import os
 import stat
 import subprocess
+import time
 from pathlib import Path
 from .storage import DmdError, digest
+
+class _Tee:
+    """Feed the tree hash and one per-file hash from a single read, so a snapshot can
+    name which paths moved without changing the fingerprint scheme."""
+    def __init__(self, tree):
+        self.tree = tree
+        self.own = hashlib.sha256()
+    def update(self, data):
+        self.tree.update(data)
+        self.own.update(data)
 
 def git(root, *args):
     try:
@@ -24,8 +35,16 @@ def identity(cwd):
     project = digest(os.fsdecode(common).rstrip("\n") if common else str(root))[:24]
     return root, project, digest(str(root))[:24]
 
-def _feed_file(h, path, label):
+def _feed_file(tree, path, label, files=None):
+    h = _Tee(tree)
     h.update(os.fsencode(label) + b"\0")
+    try:
+        _feed_body(h, path)
+    finally:
+        if files is not None:
+            files[label] = h.own.hexdigest()
+
+def _feed_body(h, path):
     try:
         before = path.lstat()
     except FileNotFoundError:
@@ -54,14 +73,25 @@ def _feed_file(h, path, label):
     else:
         raise DmdError(f"unsupported source input (not a file or symlink): {path}")
 
+def head(root):
+    """Current HEAD commit of the checkout at root, or None outside Git."""
+    raw = git(root, "rev-parse", "HEAD")
+    return os.fsdecode(raw).strip() if raw else None
+
 def fingerprint(root, inputs=(), depth=0):
+    return snapshot(root, inputs, depth)["fingerprint"]
+
+def snapshot(root, inputs=(), depth=0):
+    """One walk yields the content fingerprint (unchanged scheme), the HEAD commit and a
+    per-path digest map, so drift can be diffed instead of merely detected."""
     root = Path(root)
     if depth > 8:
         raise DmdError("nested repository depth exceeds 8")
     h = hashlib.sha256()
     h.update(b"dmd-source-v2\0")
-    head = git(root, "rev-parse", "HEAD")
-    h.update((head or b"no-head") + b"\0")
+    digests = {}
+    head_raw = git(root, "rev-parse", "HEAD")
+    h.update((head_raw or b"no-head") + b"\0")
     listing = git(root, "ls-files", "-z", "-c", "-o", "--exclude-standard")
     if listing is None:
         # A .git entry with failed discovery is not a trustworthy non-Git fallback.
@@ -81,14 +111,59 @@ def fingerprint(root, inputs=(), depth=0):
     for rel in sorted(set(files)):
         path = root / rel
         if path.is_dir() and not path.is_symlink():
-            h.update(os.fsencode(rel) + b"\0submodule\0" + fingerprint(path, depth=depth+1).encode())
+            inner = snapshot(path, depth=depth+1)
+            h.update(os.fsencode(rel) + b"\0submodule\0" + inner["fingerprint"].encode())
+            digests[rel] = inner["fingerprint"]
         else:
-            _feed_file(h, path, rel)
+            _feed_file(h, path, rel, digests)
     for item in sorted(set(inputs)):
         path = Path(item)
         if not path.is_absolute():
             path = root / path
         if not path.exists() and not path.is_symlink():
             raise DmdError(f"declared input is missing: {path}")
-        _feed_file(h, path, "external:" + str(path))
-    return h.hexdigest()
+        _feed_file(h, path, "external:" + str(path), digests)
+    return {"fingerprint": h.hexdigest(), "head": os.fsdecode(head_raw).strip() if head_raw else None, "files": digests}
+
+def drift(before, after, limit=50):
+    """What moved between two snapshots of the same candidate: HEAD and changed paths."""
+    b, a = before.get("files", {}), after.get("files", {})
+    changed = sorted(set(b) ^ set(a) | {k for k in b.keys() & a.keys() if b[k] != a[k]})
+    return {"head_before": before.get("head"), "head_after": after.get("head"),
+            "changed": changed[:limit], "changed_total": len(changed)}
+
+def candidate_root(cwd, task_root):
+    """Default candidate for a check: the task root when the check runs inside it, otherwise
+    the checkout the check's cwd belongs to (a sibling worktree, another repository), or
+    the cwd itself outside Git."""
+    cwd, task_root = Path(cwd).resolve(), Path(task_root).resolve()
+    if cwd == task_root or task_root in cwd.parents:
+        return str(task_root)
+    top = git(cwd, "rev-parse", "--show-toplevel")
+    return str(Path(os.fsdecode(top).rstrip("\n")).resolve()) if top else str(cwd)
+
+def recent_writes(root, window):
+    """Dirty or untracked paths modified within the last `window` seconds. A file still
+    being written by another session is a concurrent writer, not a candidate to test.
+    Outside Git nothing is reported."""
+    if window <= 0:
+        return []
+    listing = git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if listing is None:
+        return []
+    entries = [e for e in listing.split(b"\0") if e]
+    now = time.time()
+    found = []
+    i = 0
+    while i < len(entries):
+        entry = entries[i]; i += 1
+        code, rel = entry[:2], os.fsdecode(entry[3:])
+        if code[:1] in (b"R", b"C"):
+            i += 1  # the rename source follows as its own field
+        try:
+            age = now - (Path(root) / rel).lstat().st_mtime
+        except OSError:
+            continue
+        if age < window:
+            found.append({"path": rel, "age_s": round(max(age, 0), 3)})
+    return sorted(found, key=lambda x: x["age_s"])
