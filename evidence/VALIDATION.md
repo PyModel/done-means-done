@@ -1,6 +1,6 @@
 # Validation report
 
-Release: **Done Means Done 0.4.1**, prepared September 10, 2026. The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
+Release: **Done Means Done 0.6.0**, prepared September 13, 2026 (this header names the current release; the sections below are cumulative). The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
 
 ## Executed verification
 
@@ -75,3 +75,19 @@ Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).
 ## 0.5.2 hook-outside-checkout verification
 
 Reproduced the reported `SessionStart:startup hook error … DMD_STATE must remain outside the project being verified` by feeding `dmd hook session-start` a payload whose `cwd` is the home directory (not a Git checkout) with the default state root. Exit was 2. After the fix all four hooks exit 0 with no output for that cwd and for a deleted cwd; a session bound to a real task still names the worktree mismatch; `init` from such a cwd still refuses and names both paths. Regression suite `tests/test_resilience.py::StateOutsideCheckoutCase` (4 tests); full run `DMD_TESTS_PASS:250` in `evidence/tests-final.log`.
+
+## 0.6.0 resilience and isolation verification
+
+Trigger: a Stop hook in an unrelated project failed on every stop with `dmd: declared input is missing: /private/tmp/claude-501/…/scratchpad/api-gate.sh`. A PAUSED task from a prior session declared check inputs in a since-deleted session scratchpad; the hook fingerprinted the task before looking at its state, and the `DmdError` escaped to exit 2. Four read-only audits (hooks/isolation, model/fingerprints, runner/locking, CLI/docs) then reproduced 30-odd further edge cases; the confirmed ones are fixed below.
+
+| Check | Result |
+|---|---|
+| `tests/test_hardening.py` IncidentCase: a PAUSED task with a deleted declared input exits 0 on all four hooks in enforce mode; an ACTIVE task reports `A-01: declared input missing … --clear-inputs` as a per-check reason and every read command keeps working; the Stop hook blocks with that reason instead of exiting 2 | All pass |
+| IsolationCase: a session moving to another project releases its binding, names both roots and governs the new project's own task; a dead binding is dropped; a renamed checkout, a cwd that is a file, loose state-root permissions and malformed/non-UTF-8/empty payloads never exit nonzero; sessions and watchdogs are hashed and bounded at 50; the watchdog pause names the session; Git discovery failure refuses instead of re-keying the task | All pass |
+| InputValidationCase: `--input` rejects `""`, a directory and a missing path at edit time; fifos and unreadable files are drift, not crashes; `work add` without `--req` and `blocker add` with a bad `--item` are actionable and allocate no ID; `uncertain list` | All pass |
+| DeferralCase: `--status deferred` is refused; `finding defer` requires `--authority`; the task completes with the deferral disclosed in `summary.findings_deferred`, the headline, the amendments and the report | All pass |
+| RunnerEdgeCase: output exactly at `max_output` and non-UTF-8 output near it are not `OUTPUT_LIMIT`; a missing cwd is `SPAWN_FAILED`, a clean FAIL; a timed-out command's EXIT trap output reaches the evidence (SIGTERM, 2 s grace, then SIGKILL) | All pass |
+| HealthCase: `doctor` exits 1 naming the missing input; `list --json --state`; `gc` removes only dead bindings; `relocate` moves the record, rewrites paths and resets evidence to NOT_RUN; the sibling hint survives a pruned worktree | All pass |
+| `tests/test_candidates.py`: a fresh write settles within the default window and the run proceeds (edit-then-verify no longer refuses) while a still-dirty tree under a long window is refused; `tests/test_resilience.py`: the moved-cwd case now asserts exit 0 plus the release message | All pass; full suite `DMD_TESTS_PASS:279`, [transcript](tests-final.log) |
+
+Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).

@@ -115,9 +115,11 @@ dmd finding set --id F-01 --status fixed-verified --work W-02 --check A-02 \
 dmd finding set --id F-02 --status disproved --note "Evidence demonstrates correct behavior" \
   --evidence /absolute/outside-project/disproof.txt
 dmd finding set --id F-03 --status duplicate --duplicate F-01 --note "Same root cause and invariant"
+dmd finding defer --id F-04 --authority "Operator: vendor bug, tracked upstream as #123" \
+  --note "Fix belongs to the dependency; workaround is not authorized"
 ```
 
-Origins: `introduced`, `pre-existing`, `dependency`, `unknown`. They do not exempt remediation. Fixed findings require current mapped work/checks and a regression baseline or documented limitation. Disproof is source-bound. Duplicate chains must resolve without cycles or missing IDs. Updating a note does not reset an existing status or origin.
+Origins: `introduced`, `pre-existing`, `dependency`, `unknown`. They do not exempt remediation. `defer` is the only operator-authorized exit for a defect that will not be fixed in this assignment: `--status deferred` is refused, the authority is recorded as an amendment (so `coverage assert` is owed again), and the finding is listed as deferred in the report and the gate `summary.findings_deferred`. Fixed findings require current mapped work/checks and a regression baseline or documented limitation. Disproof is source-bound. Duplicate chains must resolve without cycles or missing IDs. Updating a note does not reset an existing status or origin.
 
 ```bash
 dmd blocker add "The integration account rejects the required permission" --item W-02 \
@@ -126,6 +128,7 @@ dmd blocker add "The integration account rejects the required permission" --item
 dmd blocker clear --id B-01 --proof "Specific prerequisite verified available"
 dmd uncertain add "Deployment request returned no observed final result"
 dmd uncertain resolve --id U-01 --proof "Queried deployment identity and verified its actual outcome"
+dmd uncertain list --json
 ```
 
 Blocker `--item` names `task` or an existing R/W/A/F ID. For dependency scheduling, prefer the exact blocked work item or requirement. The scheduler is conservative; precise IDs avoid unnecessary whole-task suspension. Open blockers and unknown effects always prevent COMPLETE.
@@ -180,5 +183,18 @@ dmd map-host-task --host-id ACTUAL_NATIVE_TASK_ID --work W-01
 dmd config --mode enforce --max-no-progress 6
 dmd migrate --from-task /absolute/legacy/task.json --authority "Operator approved this import"
 ```
+
+## Health, housekeeping and relocation
+
+```bash
+dmd doctor                      # exit 1 when anything needs attention; names the repair
+dmd list --json --state ACTIVE --state PAUSED
+dmd gc                          # removes dead session bindings; lists finished tasks, deletes none
+dmd --task T-id relocate --to /new/checkout/root --authority "Operator moved the checkout"
+dmd check edit --id A-01 --clear-inputs        # drop every declared --input
+dmd check edit --id A-01 --clear-exclusive
+```
+
+`doctor` reports the state root, hook mode, dead session bindings, this worktree's task, checks whose declared `--input` or cwd no longer exists, a stranded run, and the current gate headline. A declared input that disappears is a per-check gate reason (`A-01: declared input missing: <path>; …`), never a task-wide failure; `--input` itself must name an existing regular file. `relocate` re-points a task whose checkout was moved or renamed: paths under the old root are rewritten, every command receipt returns to `NOT_RUN`, and the move is recorded as an amendment. With one unfinished task whose root has vanished it resolves without `--task`.
 
 `--max-no-progress` ranges from 1 to 6; it is not a task duration limit. `hook` is a host entrypoint, not an agent dispatch command. See [adoption](adoption.md) and [recovery](recovery.md) for actual supported behavior and limitations.

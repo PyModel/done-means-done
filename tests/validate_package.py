@@ -22,12 +22,12 @@ def main():
     front = skill.split('---\n', 2)[1]
     assert re.search(r'^name: done-means-done$', front, re.M)
     assert re.search(r'^description: .{40,1024}$', front, re.M)
-    assert 'version: "0.5.2"' in front
+    assert 'version: "0.6.0"' in front
     assert len(skill.splitlines()) < 500
     assert '!`' not in skill, 'skill must not execute dynamic commands at load'
     assert 'allowed-tools:' not in front, 'no broad permission preapproval'
     source = json.loads((ROOT / 'SOURCE.json').read_text())
-    assert source['name'] == 'done-means-done' and source['version'] == '0.5.2'
+    assert source['name'] == 'done-means-done' and source['version'] == '0.6.0'
     assert len(source['inspected_commit']) == 40
     python_files = list(ROOT.rglob('*.py')) + [ROOT / 'bin/dmd']
     for path in python_files:
@@ -44,6 +44,9 @@ def main():
             resolved = (path.parent / target).resolve()
             assert resolved.is_relative_to(ROOT.resolve()) and resolved.exists(), (path, target)
             links += 1
+    readme = (ROOT / 'README.md').read_text()
+    assert not re.search(r'#\s*\d+ tests', readme), 'README must not hard-code the test count'
+    assert 'Done Means Done 0.6.0' in (ROOT / 'evidence/VALIDATION.md').read_text().splitlines()[2], 'VALIDATION.md release header is stale'
     for path in ROOT.rglob('*'):
         assert not path.is_symlink(), f'nonportable symlink: {path}'
         assert path.name != '__pycache__', f'bytecode cache in package: {path}'

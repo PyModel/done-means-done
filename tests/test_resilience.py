@@ -178,6 +178,12 @@ class StateOutsideCheckoutCase(DmdFixture):
     def test_bound_session_whose_cwd_moved_outside_the_checkout_is_named_not_crashed(self):
         self.setup_task()
         self.cmd("hook", "session-start", stdin=self.payload())
-        # The bound task is real; a cwd that cannot hold it is a mismatch worth naming, not a crash.
-        out, err = self.hook("stop", self.home, code=2, session="session-test")
-        self.assertIn("does not belong to this worktree", err); self.assertNotIn("Traceback", err)
+        # The bound task is real; a cwd that cannot hold it releases the binding and names
+        # both roots. It never exits 2: that would block every Stop in the other project.
+        out, err = self.hook("stop", self.home, code=0, session="session-test")
+        self.assertEqual(err, ""); msg = json.loads(out)["systemMessage"]
+        self.assertIn(str(self.repo), msg); self.assertIn(str(self.home), msg); self.assertIn("released", msg)
+        self.assertFalse(list((self.state / "sessions").glob("*.json")))
+        # The task itself is untouched and still governs its own worktree.
+        out, _ = self.hook("stop", self.repo, code=0, session="session-test")
+        self.assertIn("Done Means Done", out)

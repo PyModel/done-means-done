@@ -15,6 +15,9 @@ from .source import fingerprint
 SHELL = str(Path("/bin/sh").resolve())
 # How long to keep reading after the command exits, for output its descendants still hold.
 DRAIN_SECONDS = 2.0
+# Grace between SIGTERM and SIGKILL when a check is timed out or cancelled, so cleanup
+# handlers (containers, temp dirs, DB rows) get a chance to run.
+TERM_GRACE_SECONDS = 2.0
 
 def approval_parts(c):
     """The approval is split so an expired one can say exactly what changed.
@@ -46,6 +49,33 @@ def approval_drift(c, recorded):
               "environment": "the execution environment changed (shell, PATH, platform or interpreter)"}
     return [labels[k] for k in ("definition", "inputs", "environment") if recorded.get(k) != current[k]] or ["approval is stale"]
 
+def _signal_group(pid, sig):
+    try:
+        os.killpg(pid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # EPERM on a descendant that changed credentials: the group cannot be signalled
+        # from here; report it rather than raising out of a finally block.
+        return False
+
+
+def _release_group(proc, graceful):
+    """Terminate the held process group. A timed-out or cancelled command gets SIGTERM and
+    a short grace before SIGKILL so its cleanup handlers can run; a finished command's
+    supervisor is simply released."""
+    if graceful and _signal_group(proc.pid, signal.SIGTERM):
+        deadline = time.monotonic() + TERM_GRACE_SECONDS
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+    _signal_group(proc.pid, signal.SIGKILL)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def execute(c, cancelled=lambda: False):
     start = time.monotonic()
     limit = c["max_output"]
@@ -60,20 +90,38 @@ def execute(c, cancelled=lambda: False):
     status_closed = None
     background = False
     try:
-        proc = subprocess.Popen([sys.executable, str(supervisor), str(write_fd), SHELL, c["command"]],
-                                cwd=c["cwd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, pass_fds=(write_fd,), start_new_session=True)
-        os.close(write_fd); write_fd = -1
-        for stream, name in [(proc.stdout, "stdout"), (proc.stderr, "stderr"), (read_fd, "status")]:
-            fd = stream if isinstance(stream, int) else stream.fileno()
-            os.set_blocking(fd, False)
-            selector.register(fd, selectors.EVENT_READ, name)
-        while selector.get_map():
-            if cancelled():
-                failure = "CANCELLED"; break
+        try:
+            proc = subprocess.Popen([sys.executable, str(supervisor), str(write_fd), SHELL, c["command"]],
+                                    cwd=c["cwd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, pass_fds=(write_fd,), start_new_session=True)
+        except OSError as exc:
+            # Nothing ran (the cwd is gone, the interpreter is unusable). That is a clean
+            # FAIL with a named cause, not an interrupted run that wedges the ledger.
+            failure = "SPAWN_FAILED"
+            chunks["stderr"].extend(f"SPAWN_FAILED: {exc}".encode())
+        if proc:
+            os.close(write_fd); write_fd = -1
+            for stream, name in [(proc.stdout, "stdout"), (proc.stderr, "stderr"), (read_fd, "status")]:
+                fd = stream if isinstance(stream, int) else stream.fileno()
+                os.set_blocking(fd, False)
+                selector.register(fd, selectors.EVENT_READ, name)
+        term_at = None
+        while proc and selector.get_map():
+            if term_at is None and cancelled():
+                failure = "CANCELLED"
             remaining = c["timeout"] - (time.monotonic() - start)
-            if remaining <= 0:
-                failure = "TIMEOUT"; break
+            if term_at is None and remaining <= 0:
+                failure = "TIMEOUT"
+            if failure in ("CANCELLED", "TIMEOUT") and term_at is None:
+                # Ask the group to stop and keep reading through the grace period, so a
+                # cleanup handler's output lands in the evidence before SIGKILL.
+                term_at = time.monotonic()
+                _signal_group(proc.pid, signal.SIGTERM)
+            if term_at is not None:
+                grace_left = TERM_GRACE_SECONDS - (time.monotonic() - term_at)
+                if grace_left <= 0:
+                    break
+                remaining = grace_left
             # The command itself has finished once the status pipe closes. Descendants it
             # left running still hold the inherited stdout/stderr pipes, so waiting for EOF
             # on those would time out a check that actually passed. Drain briefly, then stop
@@ -112,23 +160,23 @@ def execute(c, cancelled=lambda: False):
         if proc:
             # Do not reap the group leader before cleanup. It is either alive
             # in its hold loop or an unreaped child: its PID cannot be reused.
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait(timeout=5)
+            _release_group(proc, graceful=failure == "INTERRUPTED")
             for stream in (proc.stdin, proc.stdout, proc.stderr):
                 if stream:
-                    stream.close()
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
     try:
         code = int(chunks["status"].decode())
     except ValueError:
         code = None
         failure = failure or "MISSING_EXIT_STATUS"
+    if failure == "SPAWN_FAILED":
+        code = None
+    # The limit is decided once, on raw captured bytes, inside the read loop. Re-deriving it
+    # from the decoded text (where a separator or a replaced byte adds length) turned a
+    # genuine pass at exactly the limit into OUTPUT_LIMIT.
     out = chunks["stdout"].decode("utf-8", errors="replace") + "\n" + chunks["stderr"].decode("utf-8", errors="replace")
-    if len(out.encode()) > limit:
-        failure = "OUTPUT_LIMIT"
-    # Over-limit output never turns into a successful truncated match.
-    out = out.encode()[:limit].decode("utf-8", errors="replace")
     return {"exit": code, "output": out, "failure": failure, "background_holders": background,
             "duration_s": round(time.monotonic() - start, 6), "captured_bytes": total}

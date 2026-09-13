@@ -6,17 +6,22 @@ import json
 import os
 import socket
 import sys
+import time
 import uuid
 from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
-from .source import candidate_root, drift, git_root, identity, recent_writes
-from .model import (SCHEMA, FINDING_STATES, WORK_STATES, accepted, acceptance_reason, attested, check_candidate, check_definition, legacy_receipt,
+from .source import candidate_root, drift, git_root, identity, recent_writes, MissingCandidate
+from .model import (SCHEMA, FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, accepted, acceptance_reason, attested, check_candidate, check_definition, legacy_receipt, missing_inputs,
                     contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, validation_errors, work_ok)
 from .runner import approval_drift, approval_parts, approval_signature, execute, SHELL
 
 QUIET_WINDOW_SECONDS = 3.0
+# Longest a run will wait for a fresh write to settle before refusing outright.
+SETTLE_SECONDS = 3.0
+# Bounded run history per check; every run's evidence file stays on disk.
+MAX_RUNS_PER_CHECK = 50
 EXCLUSIVE_WAIT_SECONDS = 600.0
 
 
@@ -69,14 +74,20 @@ def sibling_tasks(cwd):
     worktree; naming it beats a bare 'no active task'."""
     root, project, worktree = identity(cwd)
     found = []
-    for pointer in sorted((state_root() / "v2" / project).glob("*/active.json")):
-        if pointer.parent.name == worktree:
+    pointers = sorted((state_root() / "v2" / project).glob("*/active.json"))
+    if not pointers:
+        # A pruned or relocated worktree lands in a different project bucket; a task whose
+        # recorded root contains or equals this cwd is still worth naming.
+        pointers = sorted(state_root().glob("v2/*/*/active.json"))
+    for pointer in pointers:
+        if pointer.parent.name == worktree and pointer.parent.parent.name == project:
             continue
         try:
             t = load_task(pointer.parent / ident(read_json(pointer).get("task_id")))
         except (DmdError, OSError):
             continue
-        if t["state"] not in ("COMPLETE", "CANCELLED"):
+        related = pointer.parent.parent.name == project or Path(t["root"]) == root or Path(t["root"]) in root.parents or root in Path(t["root"]).parents
+        if related and t["state"] not in ("COMPLETE", "CANCELLED"):
             found.append((t["task_id"], t["state"], t["root"]))
     return found
 
@@ -108,14 +119,16 @@ def bind_session(directory, session):
         raise DmdError("a host session ID of 1..512 characters is required")
     sessions = private_dir(state_root() / "sessions")
     # Bindings whose task no longer exists are dead weight; drop them as we go.
-    for stale in sessions.glob("*.json"):
-        try:
-            target = Path(read_json(stale).get("task_dir", ""))
-            if not (target / "task.json").is_file():
-                stale.unlink()
-        except (DmdError, OSError):
-            with contextlib.suppress(OSError):
-                stale.unlink()
+    with lock(sessions, ".prune.lock", wait=1.0):
+        for stale in sessions.glob("*.json"):
+            try:
+                target = Path(read_json(stale).get("task_dir", ""))
+            except (DmdError, OSError):
+                # Unreadable is not the same as dead; another session may be mid-write.
+                continue
+            if str(target) and not (target / "task.json").is_file():
+                with contextlib.suppress(OSError):
+                    stale.unlink()
     atomic(sessions / (digest(session) + ".json"), json.dumps({"task_dir": str(directory), "session_hash": digest(session)}))
 
 
@@ -132,7 +145,7 @@ def create_task(args, request, authorization, require_review=False, prepare=None
          "approvals": {}, "coverage": None, "review": None, "running": None, "attempts": {},
          "require_independent_review": require_review, "host_map": {}}
     if getattr(args, "session", None):
-        t["sessions"].append(args.session)
+        t["sessions"].append(digest(args.session))
     if prepare is not None:
         prepare(t)
         errors = validation_errors(t)
@@ -185,7 +198,7 @@ def read_operator_file(path, name):
 
 def init(args):
     message = read_operator_file(args.request_file, "--request-file") if args.request_file else args.message
-    directory, t = create_task(args, require_text(message, "request"), require_text(args.authority, "--authority"), args.independent_review)
+    directory, t = create_task(args, require_text(message, "request (-m TEXT or --request-file PATH)"), require_text(args.authority, "--authority"), args.independent_review)
     print(t["task_id"])
 
 
@@ -211,6 +224,19 @@ def req(args):
             r["status"] = "removed"
             r["authority"] = require_text(args.authority, "explicit operator removal instruction")
             t["amendments"].append({"at": now(), "text": r["authority"], "requirement": r["id"]})
+
+
+def declared_input(cwd, item):
+    """A declared input is an existing regular file. A directory, an empty string or a
+    missing path would poison every fingerprint of the task until repaired."""
+    if not str(item).strip():
+        raise DmdError("--input must name a file; an empty value is not an input (use --clear-inputs to remove all)")
+    path = (Path(cwd) / Path(item).expanduser()).resolve()
+    if not path.exists():
+        raise DmdError(f"--input does not exist: {path}")
+    if not path.is_file():
+        raise DmdError(f"--input must be a regular file, not a directory or special file: {path}")
+    return str(path)
 
 
 def trivial_command(command):
@@ -263,6 +289,8 @@ def listing(args, group):
             print(f"{row['id']} [{row['status']}; {row['origin']}] {row['location']}: {row['text']}")
         elif group == "blockers":
             print(f"{row['id']} [{'resolved' if row['resolved'] else 'OPEN'}] {row['item']}: {row['text']}")
+        elif group == "uncertain":
+            print(f"{row['id']} [{'resolved' if row['resolved'] else 'OPEN'}] {row['text']}")
 
 
 def work(args):
@@ -275,6 +303,8 @@ def work(args):
             print(w["id"] + " superseded")
             return
         if args.action == "add":
+            if not args.req:
+                raise DmdError("--req is required and must name an existing requirement (R-XX); see dmd req list")
             get(t["requirements"], args.req)
             for dep in args.dep or []:
                 get(t["work"], dep)
@@ -362,7 +392,11 @@ def check(args):
                 c["baseline"] = None
                 c.pop("needs_review", None)
             c["cwd"] = str(Path(c["cwd"]).expanduser().resolve(strict=True))
-            c["inputs"] = [str((Path(c["cwd"]) / x).resolve(strict=True)) for x in c["inputs"]]
+            if args.clear_inputs:
+                c["inputs"] = []
+            if args.clear_exclusive:
+                c["exclusive"] = []
+            c["inputs"] = [declared_input(c["cwd"], x) for x in c["inputs"]]
             # The candidate is the tree this check's evidence is bound to. Default: the task
             # root when the check runs inside it, else the checkout its cwd belongs to.
             explicit = c.get("candidate") if args.action == "edit" and args.candidate is None else args.candidate
@@ -470,6 +504,14 @@ def preflight(t, checks, window):
     for cand in candidates:
         writes = recent_writes(cand, window)
         if writes:
+            # The normal agent turn is edit-then-verify. Wait (bounded by SETTLE_SECONDS)
+            # for the newest write to age past the window, then re-check; refuse only a
+            # tree still being written.
+            wait = window - writes[0]["age_s"]
+            if 0 < wait <= SETTLE_SECONDS:
+                time.sleep(wait + 0.05)
+                writes = recent_writes(cand, window)
+        if writes:
             named = ", ".join(f"{w['path']} ({w['age_s']}s ago)" for w in writes[:5])
             more = f" and {len(writes) - 5} more" if len(writes) > 5 else ""
             problems.append(f"concurrent writer: {cand} has dirty files modified within {window:g}s: {named}{more}")
@@ -545,9 +587,18 @@ def run(args):
                             "started": now(), "source": fps, "candidates": candidates,
                             "pid": os.getpid(), "host": socket.gethostname(), "red": bool(args.red)}
             save(directory, t, "run.start", checks=[c["id"] for c in checks], red=args.red)
+        poll = {"at": 0.0, "value": False}
         def cancelled():
-            current = load_task(directory)
-            return current["state"] in ("PAUSED", "CANCELLED") or (current.get("running") or {}).get("token") != token
+            # Re-read at most once per second; a transient read failure is not a cancel.
+            if time.monotonic() - poll["at"] < 1.0:
+                return poll["value"]
+            poll["at"] = time.monotonic()
+            try:
+                current = read_json(directory / "task.json")
+            except (DmdError, OSError):
+                return poll["value"]
+            poll["value"] = current.get("state") in ("PAUSED", "CANCELLED") or (current.get("running") or {}).get("token") != token
+            return poll["value"]
         results = []
         refused = None
         try:
@@ -634,7 +685,10 @@ def run(args):
                     current["status"] = "PASS" if success else "FAIL"
                     current["receipt"] = receipt
                     label = "PASS" if success else ("STALE" if stale else "FAIL")
-                current.setdefault("runs", []).append({"at": now(), "red": args.red, "artifact": art, "result": label})
+                runs = current.setdefault("runs", [])
+                runs.append({"at": now(), "red": args.red, "artifact": art, "result": label})
+                if len(runs) > MAX_RUNS_PER_CHECK:
+                    del runs[:-MAX_RUNS_PER_CHECK]
                 all_ok = all_ok and success
                 row = {"check": c["id"], "result": label, "exit": result["exit"], "matched": matched,
                        "failure": failure, "duration_s": result["duration_s"], "candidate": cand,
@@ -669,8 +723,20 @@ def finding(args):
                                   "location": require_text(args.location, "--location"), "origin": args.origin or "unknown",
                                   "status": status, "work": [], "checks": [], "note": args.note or ""})
             print(fid)
+        elif args.action == "defer":
+            f = get(t["findings"], args.id)
+            if f["status"] in ("fixed-verified", "disproved", "duplicate"):
+                raise DmdError(f"{f['id']} is already resolved as {f['status']}")
+            f["status"] = "deferred"
+            f["note"] = require_text(args.note, "--note explaining why this defect is deferred rather than fixed")
+            f["authority"] = require_text(args.authority, "explicit operator instruction deferring this finding (--authority)")
+            f["deferred_at"] = now()
+            t["amendments"].append({"at": now(), "text": "finding deferred under operator authority: " + f["authority"], "finding": f["id"]})
+            print(f["id"] + " deferred under recorded operator authority; it is disclosed in every report")
         else:
             f = get(t["findings"], args.id)
+            if args.status in OPERATOR_FINDING_STATES:
+                raise DmdError(f"{args.status} requires operator authority: use dmd finding defer --id {f['id']} --authority '...' --note '...'")
             if args.status:
                 f["status"] = args.status
             if args.origin:
@@ -710,8 +776,13 @@ def blocker(args):
         return listing(args, "blockers")
     with edit(args, "blocker." + args.action) as (_, t):
         if args.action == "add":
+            item = require_text(args.item, "--item naming 'task' or the R/W/A/F ID that is blocked")
+            if item != "task":
+                known = {row["id"] for group in ("requirements", "work", "checks", "findings") for row in t[group]}
+                if item not in known:
+                    raise DmdError(f"--item must be 'task' or an existing R/W/A/F ID, not {item}")
             bid = new_id(t["blockers"], "B")
-            t["blockers"].append({"id": bid, "item": args.item, "text": require_text(args.text, "concrete missing prerequisite"),
+            t["blockers"].append({"id": bid, "item": item, "text": require_text(args.text, "concrete missing prerequisite"),
                                   "owner": require_text(args.owner, "--owner"), "unblock": require_text(args.unblock, "--unblock"),
                                   "proof": require_text(args.proof, "--proof of the unavailable prerequisite"), "resolved": False})
             print(bid)
@@ -722,6 +793,8 @@ def blocker(args):
 
 
 def uncertain(args):
+    if args.action == "list":
+        return listing(args, "uncertain")
     with edit(args, "uncertain." + args.action) as (_, t):
         if args.action == "add":
             uid = new_id(t["uncertain"], "U")
@@ -925,8 +998,8 @@ def other(args):
             print("Change diagnostic strategy before another equivalent attempt; obligation remains active."
                   if repeated_attempts(history) else "Attempt recorded.")
         elif args.command == "bind-session":
-            if args.session not in t["sessions"]:
-                t["sessions"].append(args.session)
+            from .hooks import remember_session
+            remember_session(t, args.session)
             bind_session(directory, args.session)
         elif args.command == "map-host-task":
             get(t["work"], args.work)
@@ -959,6 +1032,166 @@ def other(args):
                 t["running"] = None
                 t.setdefault("recovery", []).append({"at": now(), "proof": args.proof, "found": found})
                 print(json.dumps(found, indent=2))
+
+
+def doctor(args):
+    """One read-only health pass over the things that otherwise surface as an error in the
+    middle of some other command. Exit 1 when anything needs attention."""
+    report = {"state_root": None, "hook_mode": None, "problems": [], "notes": []}
+    try:
+        root = state_root()
+        report["state_root"] = str(root)
+    except DmdError as exc:
+        report["problems"].append(f"state root: {exc}")
+        print(json.dumps(report, indent=2)); return 1
+    config_path = root / "config.json"
+    try:
+        config = read_json(config_path) if config_path.exists() else {"mode": "observe"}
+        report["hook_mode"] = config.get("mode", "observe")
+        if report["hook_mode"] not in ("off", "observe", "enforce"):
+            report["problems"].append(f"config.json: invalid hook mode {report['hook_mode']!r}")
+    except DmdError as exc:
+        report["problems"].append(f"config.json: {exc}")
+    if os.environ.get("PATH") and not any((Path(d) / "dmd").exists() for d in os.environ["PATH"].split(os.pathsep) if d):
+        report["notes"].append("no dmd on PATH; run hooks/install.py --link-bin or call bin/dmd by path")
+    sessions = root / "sessions"
+    dead = 0
+    for pointer in (sessions.glob("*.json") if sessions.is_dir() else []):
+        try:
+            target = Path(read_json(pointer).get("task_dir", ""))
+            if not (target / "task.json").is_file():
+                dead += 1
+        except (DmdError, OSError):
+            report["problems"].append(f"unreadable session binding: {pointer.name}")
+    if dead:
+        report["notes"].append(f"{dead} dead session binding(s); dmd gc removes them")
+    try:
+        directory = locate(args.cwd)
+    except (DmdError, OSError) as exc:
+        report["problems"].append(f"this worktree: {exc}")
+        directory = None
+    if directory is None:
+        report["notes"].append("no active task in this worktree")
+        try:
+            related = sibling_tasks(args.cwd)
+        except (DmdError, OSError):
+            related = []
+        if related:
+            report["notes"].append("related: " + "; ".join(f"{tid} is {state} in {r}" for tid, state, r in related))
+    else:
+        t = load_task(directory)
+        report["task"] = {"task_id": t["task_id"], "state": t["state"], "root": t["root"], "dir": str(directory)}
+        if not Path(t["root"]).is_dir():
+            report["problems"].append(f"task root is missing: {t['root']}; dmd relocate --to <path> --authority '...'")
+        for c in live(t["checks"]):
+            lost = missing_inputs(c)
+            if lost:
+                report["problems"].append(f"{c['id']}: declared input missing: {', '.join(lost)}; check edit --id {c['id']} --input <file> or --clear-inputs")
+            if not Path(c["cwd"]).is_dir():
+                report["problems"].append(f"{c['id']}: cwd is missing: {c['cwd']}")
+        running = t.get("running")
+        if running:
+            alive = pid_alive(running.get("pid"), running.get("host"))
+            if alive is False:
+                report["problems"].append(f"stranded run of {running.get('checks')}: runner pid {running.get('pid')} is gone; dmd recover-run --proof '...'")
+            else:
+                report["notes"].append(f"run in progress: {running.get('checks')} (pid {running.get('pid')})")
+        try:
+            g = gate(directory, t)
+            report["gate"] = {"status": g["status"], "headline": (g.get("summary") or {}).get("headline")}
+        except DmdError as exc:
+            report["problems"].append(f"gate: {exc}")
+    print(json.dumps(report, indent=2))
+    return 1 if report["problems"] else 0
+
+
+def gc(args):
+    """Remove dead session bindings and list finished task records. Task directories are
+    never deleted here: evidence is the audit trail, and removal is the operator's call."""
+    root = state_root()
+    sessions = root / "sessions"
+    removed = 0
+    if sessions.is_dir():
+        with lock(sessions, ".prune.lock", wait=1.0):
+            for pointer in sessions.glob("*.json"):
+                try:
+                    target = Path(read_json(pointer).get("task_dir", ""))
+                except (DmdError, OSError):
+                    continue
+                if str(target) and not (target / "task.json").is_file():
+                    with contextlib.suppress(OSError):
+                        pointer.unlink(); removed += 1
+    finished = []
+    for path in sorted(root.glob("v2/*/*/*/task.json")):
+        try:
+            t = load_task(path.parent)
+        except (DmdError, OSError):
+            continue
+        if t["state"] in ("COMPLETE", "CANCELLED"):
+            finished.append({"task_id": t["task_id"], "state": t["state"], "root": t["root"], "path": str(path.parent)})
+    print(json.dumps({"session_bindings_removed": removed, "finished_tasks": finished,
+                      "note": "finished task directories are listed, not deleted; remove them explicitly if their evidence is no longer needed"}, indent=2))
+    return 0
+
+
+def relocate(args):
+    """Re-point a task whose checkout moved. Every receipt is bound to the old tree, so all
+    command evidence returns to NOT_RUN; nothing is silently carried across."""
+    import shutil
+    new_root = Path(args.to).expanduser().resolve(strict=True)
+    if not new_root.is_dir():
+        raise DmdError("--to must be an existing directory")
+    require_text(args.authority, "--authority recording the operator instruction to relocate")
+    matches = []
+    for path in sorted(state_root().glob("v2/*/*/*/task.json")):
+        try:
+            t = load_task(path.parent)
+        except (DmdError, OSError):
+            continue
+        if args.task:
+            if t["task_id"] == args.task:
+                matches.append(path.parent)
+        elif t["state"] not in ("COMPLETE", "CANCELLED") and not Path(t["root"]).is_dir():
+            matches.append(path.parent)
+    if len(matches) != 1:
+        raise DmdError(f"{len(matches)} task(s) matched; name exactly one with --task <id> (dmd list shows roots)")
+    old_dir = matches[0]
+    with lock(old_dir):
+        t = load_task(old_dir)
+        old_root = t["root"]
+        if old_root == str(new_root):
+            raise DmdError("task already lives at that root")
+        base, root = base_dir(new_root)
+        if str(root) != str(new_root):
+            raise DmdError(f"--to must be the checkout root ({root}), not a subdirectory")
+        new_dir = base / t["task_id"]
+        if new_dir.exists():
+            raise DmdError(f"a task record already exists at {new_dir}")
+        def moved(path):
+            p = Path(path)
+            if p == Path(old_root) or Path(old_root) in p.parents:
+                return str(new_root / p.relative_to(old_root))
+            return str(p)
+        t["root"] = str(new_root)
+        for c in t["checks"]:
+            c["cwd"] = moved(c["cwd"])
+            c["inputs"] = [moved(x) for x in c.get("inputs", [])]
+            if c.get("candidate"):
+                c["candidate"] = moved(c["candidate"])
+            if c.get("status") == "PASS":
+                c["status"] = "NOT_RUN"
+        t["amendments"].append({"at": now(), "text": f"relocated from {old_root} to {new_root}: " + args.authority})
+        t.setdefault("relocations", []).append({"at": now(), "from": old_root, "to": str(new_root), "authority": args.authority})
+        shutil.copytree(old_dir, new_dir, symlinks=False, ignore=shutil.ignore_patterns(".lock", ".run.lock"))
+        save(new_dir, t, "relocate", **{"from": old_root, "to": str(new_root)})
+        atomic(base / "active.json", json.dumps({"task_id": t["task_id"]}))
+        old_marker = old_dir.parent / "active.json"
+        if old_marker.exists() and read_json(old_marker).get("task_id") == t["task_id"]:
+            old_marker.unlink()
+        shutil.rmtree(old_dir)
+    print(json.dumps({"task_id": t["task_id"], "from": old_root, "to": str(new_root), "dir": str(new_dir),
+                      "note": "all command evidence is now NOT_RUN; approve and rerun checks against the new tree"}))
+    return 0
 
 
 def configuration(args):
@@ -1003,7 +1236,10 @@ HELP = {
     "recover-run": "Clear an interrupted run after checking the runner",
     "config": "Set the hook mode (off, observe, enforce) and watchdog limit",
     "hook": "Entry point for installed host lifecycle hooks",
-    "list": "List every task record in the state directory",
+    "list": "List every task record in the state directory (--json, --state)",
+    "doctor": "Health check: state root, hook mode, bindings, this worktree's task",
+    "gc": "Remove dead session bindings; list finished task records",
+    "relocate": "Re-point a task whose checkout moved (all evidence becomes NOT_RUN)",
     "migrate": "Import a schema-1 record into a new schema-2 task",
 }
 
@@ -1021,14 +1257,14 @@ def parser():
     s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"])
     for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence", "candidate"]:
         s.add_argument("--" + flag)
-    s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--exclusive", action="append"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because"); s.add_argument("--json", action="store_true")
+    s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--clear-inputs", action="store_true"); s.add_argument("--clear-exclusive", action="store_true"); s.add_argument("--exclusive", action="append"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because"); s.add_argument("--json", action="store_true")
     s = command("preview", preview); s.add_argument("id")
     s = command("approve", approve); s.add_argument("id"); s.add_argument("--note", required=True)
     s = command("run", run); s.add_argument("ids", nargs="*"); s.add_argument("--all", action="store_true"); s.add_argument("--red", action="store_true"); s.add_argument("--quiet-window", type=float); s.add_argument("--wait-exclusive", type=float)
-    s = command("finding", finding); s.add_argument("action", choices=["add", "set", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--location"); s.add_argument("--status", choices=sorted(FINDING_STATES)); s.add_argument("--origin", choices=["introduced", "pre-existing", "dependency", "unknown"]); s.add_argument("--note"); s.add_argument("--work", action="append"); s.add_argument("--check", action="append"); s.add_argument("--duplicate"); s.add_argument("--evidence"); s.add_argument("--json", action="store_true")
+    s = command("finding", finding); s.add_argument("action", choices=["add", "set", "defer", "list"]); s.add_argument("--authority"); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--location"); s.add_argument("--status", choices=sorted(FINDING_STATES)); s.add_argument("--origin", choices=["introduced", "pre-existing", "dependency", "unknown"]); s.add_argument("--note"); s.add_argument("--work", action="append"); s.add_argument("--check", action="append"); s.add_argument("--duplicate"); s.add_argument("--evidence"); s.add_argument("--json", action="store_true")
     s = command("blocker", blocker); s.add_argument("action", choices=["add", "clear", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--json", action="store_true")
     for flag in ["id", "item", "owner", "unblock", "proof"]: s.add_argument("--" + flag)
-    s = command("uncertain", uncertain); s.add_argument("action", choices=["add", "resolve"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--proof")
+    s = command("uncertain", uncertain); s.add_argument("action", choices=["add", "resolve", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--proof"); s.add_argument("--json", action="store_true")
     s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert"]); s.add_argument("--note")
     s = command("review", review); s.add_argument("--kind", choices=["self", "independent"], required=True); s.add_argument("--reviewer", required=True); s.add_argument("--note", required=True); s.add_argument("--evidence", required=True)
     for name in ["status", "next", "gate", "report", "handoff", "reconcile"]:
@@ -1042,7 +1278,10 @@ def parser():
     s = command("recover-run", other); s.add_argument("--proof", required=True)
     s = command("config", configuration); s.add_argument("--mode", choices=["off", "observe", "enforce"]); s.add_argument("--max-no-progress", type=int)
     s = command("hook", None); s.add_argument("event", choices=["session-start", "stop", "task-completed", "post-tool-use", "post-tool-failure"])
-    command("list", None)
+    s = command("list", None); s.add_argument("--json", action="store_true"); s.add_argument("--state", action="append")
+    command("doctor", doctor)
+    command("gc", gc)
+    s = command("relocate", relocate); s.add_argument("--to", required=True); s.add_argument("--authority", required=True)
     s = command("migrate", None); s.add_argument("--from-task", required=True); s.add_argument("--authority", required=True); s.add_argument("--new", action="store_true")
     return p
 
@@ -1059,15 +1298,24 @@ def main(argv=None):
             return migrate(args)
         if args.command == "list":
             damaged = 0
+            rows = []
             for path in sorted(state_root().glob("v2/*/*/*/task.json")):
                 # One unreadable record must never hide every healthy assignment.
                 try:
                     t = load_task(path.parent)
-                    row = {"task_id": t["task_id"], "stored_state": t["state"], "root": t["root"], "path": str(path)}
+                    row = {"task_id": t["task_id"], "stored_state": t["state"], "root": t["root"], "path": str(path),
+                           "updated_at": t.get("updated_at")}
                 except (DmdError, OSError) as exc:
                     damaged += 1
                     row = {"task_id": None, "stored_state": "UNREADABLE", "path": str(path), "error": str(exc)}
-                print(json.dumps(row))
+                if args.state and row["stored_state"] not in args.state:
+                    continue
+                rows.append(row)
+            if args.json:
+                print(json.dumps(rows, indent=2))
+            else:
+                for row in rows:
+                    print(json.dumps(row))
             if damaged:
                 print(f"dmd: {damaged} unreadable record(s) listed above; repair or migrate them explicitly", file=sys.stderr)
             return 0

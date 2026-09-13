@@ -121,8 +121,13 @@ class RuntimeCase(DmdFixture):
         (self.repo / ".gitignore").write_text("ignored.txt\n"); p = self.repo / "ignored.txt"; p.write_text("a")
         old = fingerprint(self.repo); explicit = fingerprint(self.repo, [str(p)]); p.write_text("b")
         self.assertEqual(old, fingerprint(self.repo)); self.assertNotEqual(explicit, fingerprint(self.repo, [str(p)]))
-    def test_missing_declared_input_refused(self):
-        with self.assertRaises(DmdError): fingerprint(self.repo, [str(self.repo / "absent")])
+    def test_missing_declared_input_is_drift_not_a_crash(self):
+        from dmdlib.source import snapshot
+        absent = self.repo / "absent"
+        with_input = snapshot(self.repo, [str(absent)])
+        self.assertEqual(with_input["missing_inputs"], [str(absent)])
+        self.assertNotEqual(with_input["fingerprint"], fingerprint(self.repo))
+        absent.write_text("x"); self.assertNotEqual(with_input["fingerprint"], fingerprint(self.repo, [str(absent)]))
     def test_symlink_input_target_is_not_silently_followed(self):
         target = self.home / "external"; target.write_text("a"); link = self.repo / "link"; link.symlink_to(target)
         old = fingerprint(self.repo); target.write_text("b"); self.assertEqual(old, fingerprint(self.repo)); link.unlink(); link.symlink_to("different"); self.assertNotEqual(old, fingerprint(self.repo))

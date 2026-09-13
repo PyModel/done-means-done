@@ -44,6 +44,7 @@ test_group_lists (test_candidates.ListingCase.test_group_lists) ... ok
 test_listing_does_not_mutate_or_execute (test_candidates.ListingCase.test_listing_does_not_mutate_or_execute) ... ok
 test_status_only_renders_the_requested_sections (test_candidates.ListingCase.test_status_only_renders_the_requested_sections) ... ok
 test_another_tasks_live_run_on_the_same_candidate_is_refused (test_candidates.PreflightCase.test_another_tasks_live_run_on_the_same_candidate_is_refused) ... ok
+test_fresh_write_settles_within_default_window_then_runs (test_candidates.PreflightCase.test_fresh_write_settles_within_default_window_then_runs) ... ok
 test_old_dirty_files_are_not_writers (test_candidates.PreflightCase.test_old_dirty_files_are_not_writers) ... ok
 test_recent_dirty_write_is_refused_with_the_path (test_candidates.PreflightCase.test_recent_dirty_write_is_refused_with_the_path) ... ok
 test_untracked_recent_files_count (test_candidates.PreflightCase.test_untracked_recent_files_count) ... ok
@@ -122,6 +123,34 @@ test_bindings_for_removed_tasks_are_pruned (test_fixes.SessionHygieneCase.test_b
 test_events_jsonl_keeps_the_complete_history (test_fixes.StateGrowthCase.test_events_jsonl_keeps_the_complete_history) ... ok
 test_sequence_numbers_remain_contiguous_after_trimming (test_fixes.StateGrowthCase.test_sequence_numbers_remain_contiguous_after_trimming) ... ok
 test_task_record_keeps_a_bounded_event_tail (test_fixes.StateGrowthCase.test_task_record_keeps_a_bounded_event_tail) ... ok
+test_finding_defer_requires_authority_and_is_disclosed (test_hardening.DeferralCase.test_finding_defer_requires_authority_and_is_disclosed) ... ok
+test_doctor_healthy_exits_0_and_list_json_filters (test_hardening.HealthCase.test_doctor_healthy_exits_0_and_list_json_filters) ... ok
+test_doctor_reports_missing_inputs_and_exits_1 (test_hardening.HealthCase.test_doctor_reports_missing_inputs_and_exits_1) ... ok
+test_gc_removes_dead_bindings_only (test_hardening.HealthCase.test_gc_removes_dead_bindings_only) ... ok
+test_relocate_moves_the_record_and_resets_evidence (test_hardening.HealthCase.test_relocate_moves_the_record_and_resets_evidence) ... ok
+test_sibling_hint_survives_a_pruned_worktree (test_hardening.HealthCase.test_sibling_hint_survives_a_pruned_worktree) ... ok
+test_active_task_with_deleted_input_names_the_check_and_the_repair (test_hardening.IncidentCase.test_active_task_with_deleted_input_names_the_check_and_the_repair) ... ok
+test_hook_over_active_task_with_deleted_input_reports_instead_of_exit_2 (test_hardening.IncidentCase.test_hook_over_active_task_with_deleted_input_reports_instead_of_exit_2) ... ok
+test_paused_task_with_deleted_input_never_fails_a_hook (test_hardening.IncidentCase.test_paused_task_with_deleted_input_never_fails_a_hook) ... ok
+test_blocker_add_validates_item_before_allocating_an_id (test_hardening.InputValidationCase.test_blocker_add_validates_item_before_allocating_an_id) ... ok
+test_directory_and_empty_inputs_are_rejected (test_hardening.InputValidationCase.test_directory_and_empty_inputs_are_rejected) ... ok
+test_special_and_unreadable_files_are_drift_not_crashes (test_hardening.InputValidationCase.test_special_and_unreadable_files_are_drift_not_crashes) ... ok
+test_uncertain_list (test_hardening.InputValidationCase.test_uncertain_list) ... ok
+test_work_add_without_req_is_actionable (test_hardening.InputValidationCase.test_work_add_without_req_is_actionable) ... ok
+test_cwd_that_is_a_file_is_ignored (test_hardening.IsolationCase.test_cwd_that_is_a_file_is_ignored) ... ok
+test_dead_binding_is_dropped_not_fatal (test_hardening.IsolationCase.test_dead_binding_is_dropped_not_fatal) ... ok
+test_git_discovery_failure_does_not_rekey_the_task (test_hardening.IsolationCase.test_git_discovery_failure_does_not_rekey_the_task) ... ok
+test_loose_state_root_permissions_report_not_block (test_hardening.IsolationCase.test_loose_state_root_permissions_report_not_block) ... ok
+test_malformed_payloads_never_exit_nonzero (test_hardening.IsolationCase.test_malformed_payloads_never_exit_nonzero) ... ok
+test_renamed_checkout_does_not_block_stop (test_hardening.IsolationCase.test_renamed_checkout_does_not_block_stop) ... ok
+test_session_moving_to_another_project_is_released_and_governs_the_new_one (test_hardening.IsolationCase.test_session_moving_to_another_project_is_released_and_governs_the_new_one) ... ok
+test_sessions_are_stored_hashed_and_bounded (test_hardening.IsolationCase.test_sessions_are_stored_hashed_and_bounded) ... ok
+test_watchdog_pause_names_the_session (test_hardening.IsolationCase.test_watchdog_pause_names_the_session) ... ok
+test_missing_cwd_is_a_clean_spawn_failure (test_hardening.RunnerEdgeCase.test_missing_cwd_is_a_clean_spawn_failure) ... ok
+test_non_utf8_output_near_the_limit_is_not_a_failure (test_hardening.RunnerEdgeCase.test_non_utf8_output_near_the_limit_is_not_a_failure) ... ok
+test_output_exactly_at_the_limit_is_not_a_failure (test_hardening.RunnerEdgeCase.test_output_exactly_at_the_limit_is_not_a_failure) ... ok
+test_spawn_failure_does_not_wedge_the_ledger (test_hardening.RunnerEdgeCase.test_spawn_failure_does_not_wedge_the_ledger) ... ok
+test_timeout_gives_cleanup_handlers_a_chance (test_hardening.RunnerEdgeCase.test_timeout_gives_cleanup_handlers_a_chance) ... ok
 test_all_requirements_removed_not_success (test_model.ModelCase.test_all_requirements_removed_not_success) ... ok
 test_attest_only_without_authority_is_invalid (test_model.ModelCase.test_attest_only_without_authority_is_invalid) ... ok
 test_attestation_counts_are_reported (test_model.ModelCase.test_attestation_counts_are_reported) ... ok
@@ -221,7 +250,7 @@ test_initialization_collision_cannot_overwrite (test_runtime.RuntimeCase.test_in
 test_invalid_session_rejected_before_task_activation (test_runtime.RuntimeCase.test_invalid_session_rejected_before_task_activation) ... ok
 test_manual_evidence_requires_existing_file (test_runtime.RuntimeCase.test_manual_evidence_requires_existing_file) ... ok
 test_metadata_only_touch_does_not_stale_content (test_runtime.RuntimeCase.test_metadata_only_touch_does_not_stale_content) ... ok
-test_missing_declared_input_refused (test_runtime.RuntimeCase.test_missing_declared_input_refused) ... ok
+test_missing_declared_input_is_drift_not_a_crash (test_runtime.RuntimeCase.test_missing_declared_input_is_drift_not_a_crash) ... ok
 test_new_task_preserves_old_as_paused (test_runtime.RuntimeCase.test_new_task_preserves_old_as_paused) ... ok
 test_observe_mode_does_not_block_or_pause (test_runtime.RuntimeCase.test_observe_mode_does_not_block_or_pause) ... ok
 test_off_mode_has_no_hook_effect (test_runtime.RuntimeCase.test_off_mode_has_no_hook_effect) ... ok
@@ -251,7 +280,7 @@ test_watchdog_pauses_without_claiming_completion (test_runtime.RuntimeCase.test_
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 250 tests in 46.755s
+Ran 279 tests in 56.869s
 
 OK
-DMD_TESTS_PASS:250;skipped=0
+DMD_TESTS_PASS:279;skipped=0

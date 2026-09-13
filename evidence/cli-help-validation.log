@@ -1,4 +1,3 @@
-0.5.2
 usage: dmd [-h] [--version] [--cwd CWD] [--task TASK] COMMAND ...
 
 Persistent obligations, strict remediation, verified completion
@@ -34,7 +33,13 @@ positional arguments:
     config         Set the hook mode (off, observe, enforce) and watchdog
                    limit
     hook           Entry point for installed host lifecycle hooks
-    list           List every task record in the state directory
+    list           List every task record in the state directory (--json,
+                   --state)
+    doctor         Health check: state root, hook mode, bindings, this
+                   worktree's task
+    gc             Remove dead session bindings; list finished task records
+    relocate       Re-point a task whose checkout moved (all evidence becomes
+                   NOT_RUN)
     migrate        Import a schema-1 record into a new schema-2 task
 
 options:
@@ -42,3 +47,4 @@ options:
   --version        show program's version number and exit
   --cwd CWD
   --task TASK
+0.6.0

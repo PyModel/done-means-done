@@ -4,7 +4,7 @@ description: Complete substantial authorized assignments with a persistent requi
 license: MIT
 compatibility: Python 3.10+ on macOS or Linux. Git is optional. Claude Code lifecycle hooks are optional and explicitly installed.
 metadata:
-  version: "0.5.2"
+  version: "0.6.0"
 ---
 
 # Done Means Done
@@ -86,9 +86,10 @@ Use `suspected` until evidence supports confirmation. The lifecycle is:
 suspected -> confirmed -> fixed-unverified -> fixed-verified
           -> disproved (current evidence)
           -> duplicate (resolved canonical finding, no cycles)
+          -> deferred (operator authority only: dmd finding defer --authority ...)
 ```
 
-Every confirmed defect discovered in the authorized project is mandatory work, whether introduced, pre-existing, minor, or in a dependency. A finding is not resolved merely because it has been reported, appears outside the initially touched files, or is inconvenient. There is no successful logged-only, ignored, deferred, or agent-selected scope-exclusion state.
+Every confirmed defect discovered in the authorized project is mandatory work, whether introduced, pre-existing, minor, or in a dependency. A finding is not resolved merely because it has been reported, appears outside the initially touched files, or is inconvenient. There is no successful logged-only, ignored, or agent-selected scope-exclusion state. The one exception is `deferred`: the operator, not the agent, may defer a defect (a vendored bug tracked upstream, a pre-existing issue explicitly out of scope) with `dmd finding defer --id F-XX --authority "<their words>" --note "<why>"`. It is recorded as an amendment, reasserted through coverage, and named in every report and gate headline. Never write `--status deferred` yourself and never invent authority.
 
 Create remediation work, update affected callers, and add a regression check. A dependency defect may require an authorized upgrade, workaround, patch, or fork. A missing permission remains a concrete blocker; do not modify third-party systems or production without authorization.
 
@@ -197,5 +198,7 @@ Record blockers immediately with affected ID, observed proof, exact unblocking a
 | `COMPLETE` | Current authorized obligations and acceptance conditions are satisfied |
 
 The optional hooks redirect premature stops inside a running Claude Code session. They preserve cancellation and include a no-progress safeguard. They do not restart a terminated host, schedule future execution, or create a multi-day supervisor. Never claim background work or automatic recovery beyond installed capabilities.
+
+Hooks fail open. The only nonzero hook exit is TaskCompleted enforcement; any other problem (a moved checkout, a deleted declared input, a dead session binding, loose state permissions, a malformed payload) becomes a `systemMessage` naming the cause and exit 0. When you see one, run `dmd doctor` in the worktree: it names the offending check, path or binding and the command that repairs it. See [recovery](references/recovery.md), "When a hook fails".
 
 Runtime state and evidence are local auditability, not a security boundary against an agent with the same filesystem permissions. Coverage, authority, reviewer identity, and manual observations still require honest engineering judgment. Do not claim universal bug freedom or guaranteed uninterrupted execution. The enforceable promise is that recorded unmet obligations cannot honestly be reported as complete.

@@ -4,12 +4,16 @@ import re
 from collections import deque
 from pathlib import Path
 from .storage import DmdError, digest, evidence_ok
-from .source import snapshot
+from .source import snapshot, MissingCandidate
 
 SCHEMA = 2
 TASK_STATES = {"ACTIVE", "PAUSED", "BLOCKED", "CANCELLED", "COMPLETE"}
 WORK_STATES = {"todo", "doing", "implemented", "verified"}
-FINDING_STATES = {"suspected", "confirmed", "fixed-unverified", "fixed-verified", "disproved", "duplicate"}
+FINDING_STATES = {"suspected", "confirmed", "fixed-unverified", "fixed-verified", "disproved", "duplicate", "deferred"}
+# Findings the agent may not resolve on its own judgement: `deferred` exists only under
+# recorded operator authority (dmd finding defer), mirrors req attest-only, and is disclosed
+# by name in every report and gate summary.
+OPERATOR_FINDING_STATES = ("deferred",)
 CHECK_FIELDS = ("id", "req", "work", "method", "command", "cwd", "expect", "match", "timeout", "max_output", "inputs", "regression", "red_match", "red_exit", "attested_because")
 # Added in 0.5.0. Part of the definition only when set, so a record written by an earlier
 # release keeps its definition digest, approvals and receipts across the upgrade.
@@ -229,6 +233,17 @@ def _legacy_source_current(r, fp, root):
         return r.get("source") == fp.get(str(Path(root)))
     return r.get("source") in fp.values()
 
+def missing_inputs(c):
+    """Declared inputs of one check that no longer exist on disk."""
+    found = []
+    for item in c.get("inputs", []) or []:
+        path = Path(item)
+        if not path.is_absolute():
+            path = Path(c["cwd"]) / path
+        if not path.exists() and not path.is_symlink():
+            found.append(str(path))
+    return found
+
 def acceptance_reason(task_dir, c, fp, root=None):
     """None when the check's evidence is currently accepted; otherwise one specific reason.
     A reader must never have to guess between not run, failed, stale, unapproved and
@@ -237,6 +252,10 @@ def acceptance_reason(task_dir, c, fp, root=None):
         return "superseded"
     if c.get("needs_review"):
         return "definition edited; inspect, approve and rerun"
+    lost = missing_inputs(c)
+    if lost:
+        return (f"declared input missing: {', '.join(lost)}; restore it, or dmd check edit --id {c['id']} "
+                "--input <file> (or --clear-inputs) and rerun")
     r = c.get("receipt") or {}
     if c.get("status") == "NOT_RUN":
         return "not run"
@@ -330,6 +349,10 @@ def unresolved_findings(task_dir, t, fp):
                 if not f.get("note"):
                     reason = "duplicate needs rationale"; break
                 current = f.get("duplicate"); continue
+            if status == "deferred":
+                if not f.get("note") or not str(f.get("authority") or "").strip():
+                    reason = "deferral needs a rationale and recorded operator authority"
+                break
             if status == "disproved":
                 bound = (source_digest(fp), fp.get(str(Path(t["root"])))) if isinstance(fp, dict) else (fp,)
                 if not f.get("note") or f.get("source") not in bound or not evidence_ok(task_dir, f.get("artifact")):
@@ -398,8 +421,14 @@ def gate(task_dir, t, fp=None, require_review=True):
     if errors:
         return {"status": "INVALID", "reasons": errors, "next": []}
     if t["state"] in ("CANCELLED", "PAUSED"):
-        return {"status": t["state"], "reasons": ["execution suspended; obligations are not complete"], "next": []}
-    fp = fp or task_fingerprint(t)
+        return {"status": t["state"], "reasons": ["execution suspended; obligations are not complete"], "next": [],
+                "summary": {"headline": f"task is {t['state']}" + (f": {t.get('state_reason')}" if t.get("state_reason") else ""),
+                            "rerun": None}}
+    try:
+        fp = fp or task_fingerprint(t)
+    except MissingCandidate as exc:
+        return {"status": "BLOCKED", "reasons": [str(exc)], "next": [],
+                "summary": {"headline": "a candidate tree is missing", "rerun": None}}
     reasons = []
     cov = t.get("coverage") or {}
     if cov.get("digest") != contract_digest(t):
@@ -465,13 +494,15 @@ def gate(task_dir, t, fp=None, require_review=True):
 def gate_summary(task_dir, t, fp, review_owed):
     """The gate's reasons grouped by cause, so twenty-five stale lines read as one fact
     and the reader gets the command that discharges it."""
-    groups = {"accepted": [], "stale": [], "failed": [], "not_run": [], "unapproved": [], "legacy": [], "other": []}
+    groups = {"accepted": [], "stale": [], "failed": [], "not_run": [], "unapproved": [], "legacy": [], "missing_inputs": [], "other": []}
     for c in live(t["checks"]):
         reason = acceptance_reason(task_dir, c, fp, t["root"])
         if reason is None:
             groups["legacy" if legacy_receipt(c) else "accepted"].append(c["id"])
         elif reason == "not run":
             groups["not_run"].append(c["id"])
+        elif reason.startswith("declared input missing"):
+            groups["missing_inputs"].append(c["id"])
         elif reason.startswith("FAIL"):
             groups["failed"].append(c["id"])
         elif "approve" in reason:
@@ -493,18 +524,23 @@ def gate_summary(task_dir, t, fp, review_owed):
         parts.append(f"{len(groups['not_run'])} check(s) not run")
     if groups["unapproved"]:
         parts.append(f"{len(groups['unapproved'])} check(s) need approval")
+    if groups["missing_inputs"]:
+        parts.append(f"{len(groups['missing_inputs'])} check(s) declare a missing input")
     if groups["other"]:
         parts.append(f"{len(groups['other'])} check(s) lack evidence")
     if unverified and not rerun and not groups["unapproved"] and not groups["other"]:
         parts.append(f"{len(unverified)} work item(s) not verified")
     if open_findings:
         parts.append(f"{len(open_findings)} finding(s) open")
+    deferred = [f["id"] for f in t["findings"] if f["status"] == "deferred"]
+    if deferred:
+        parts.append(f"{len(deferred)} finding(s) deferred under operator authority")
     if open_blockers:
         parts.append(f"{len(open_blockers)} blocker(s) open")
     if review_owed:
         parts.append("final review owed")
     headline = "; ".join(parts) or "all obligations satisfied"
     return {"headline": headline, "checks": groups, "work_unverified": unverified,
-            "findings_open": open_findings, "blockers_open": open_blockers,
+            "findings_open": open_findings, "findings_deferred": deferred, "blockers_open": open_blockers,
             "review": "owed" if review_owed else "current",
             "rerun": ("dmd run " + " ".join(rerun)) if rerun else None}

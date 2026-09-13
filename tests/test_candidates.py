@@ -223,6 +223,15 @@ class PreflightCase(GitFixture):
         self.assertEqual(load_task(locate(self.repo))["checks"][0]["status"], "NOT_RUN")
         self.assertIsNone(load_task(locate(self.repo))["running"])
 
+    def test_fresh_write_settles_within_default_window_then_runs(self):
+        # The normal agent turn: edit, then verify immediately. The run waits out the
+        # default window instead of refusing.
+        self.linked_worktree(); self.setup_task()
+        (self.repo / "subject.py").write_text("VALUE = 42\n# touched\n")
+        started = time.monotonic(); self.cmd("run", "A-01")
+        self.assertGreaterEqual(time.monotonic() - started, 1.0)
+        self.assertEqual(load_task(locate(self.repo))["checks"][0]["status"], "PASS")
+
     def test_old_dirty_files_are_not_writers(self):
         self.linked_worktree(); self.setup_task()
         p = self.repo / "subject.py"; p.write_text("VALUE = 42\n# touched\n"); old = time.time() - 120; os.utime(p, (old, old))
