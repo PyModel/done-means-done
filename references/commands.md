@@ -66,7 +66,7 @@ A check whose command passed (expected exit, literal match, within bounds) while
 
 Only `--method command` produces machine-verified acceptance. `--method manual|review|browser` requires `--attested-because TEXT` saying why no command can observe the behavior; those checks are reported as `SELF-ATTESTED`, counted in `gate` output, and cannot alone accept a requirement without `req attest-only`.
 
-`--match` is a literal string, not a regex. It is necessary but not sufficient semantic proof. The called verifier must assert the correct behavior and intended test discovery before printing it. An arbitrary zero exit is insufficient.
+`--match` is a literal string, not a regex. A command whose text contains its own match (`npm test && echo OK`, `python3 -c 'print("OK")'`) is refused: that reduces to an exit status. Like the bare-printer lint, this catches the lazy case, not a determined forger. It is necessary but not sufficient semantic proof. The called verifier must assert the correct behavior and intended test discovery before printing it. An arbitrary zero exit is insufficient.
 
 `--approve NOTE` on `check add` or `check edit` records the same inspected approval as `dmd approve` for the definition as written. Any later edit clears it, so edited command text never runs uninspected.
 

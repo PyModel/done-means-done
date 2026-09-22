@@ -78,6 +78,24 @@ class StopGovernance(test_runtime.DmdFixture):
         self.setup_task(); self.enforce(); sub = self.repo / "pkg"; sub.mkdir()
         self.assertEqual(self.stop(cwd=str(sub)).get("decision"), "block")
 
+    def test_sibling_worktree_follows_its_own_task_but_not_an_empty_one(self):
+        import subprocess
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        subprocess.run(git + ["-C", str(self.repo), "add", "-A"], check=True)
+        subprocess.run(git + ["-C", str(self.repo), "commit", "-qm", "base"], check=True)
+        self.setup_task(); self.enforce()
+        empty, busy = self.home / "wt-empty", self.home / "wt-busy"
+        for wt in (empty, busy):
+            subprocess.run(git + ["-C", str(self.repo), "worktree", "add", "-q", str(wt)], check=True)
+        # No task of its own: the bound assignment keeps governing there.
+        self.assertEqual(self.stop(cwd=str(empty)).get("decision"), "block")
+        self.cmd("--cwd", str(busy), "init", "-m", "other assignment", "--authority", "operator")
+        out, _ = self.cmd("hook", "stop", stdin=self.payload(cwd=str(busy)))
+        lines = [json.loads(x) for x in out.splitlines()]
+        self.assertIn("binding was released", lines[0]["systemMessage"])
+        self.assertEqual(lines[-1].get("decision"), "block")  # now governed by the sibling's own task
+
     def test_unrelated_project_releases_the_binding(self):
         self.setup_task(); self.enforce(); other = self.home / "elsewhere"; other.mkdir()
         self.assertNotIn("decision", self.stop(cwd=str(other)))
@@ -163,6 +181,13 @@ class LessCeremonySameGuarantees(test_runtime.DmdFixture):
 
 
 class NoCheapExits(test_runtime.DmdFixture):
+    def test_a_match_token_inside_the_command_is_refused(self):
+        self.cmd("init", "-m", "x", "--authority", "operator")
+        self.cmd("req", "add", "Tests pass", "--anchor", "request")
+        for command in ('python3 -c "print(\'DONE\')"', "npm test && echo DONE", "env echo DONE"):
+            _, err = self.cmd("check", "add", "--req", "R-01", "--cmd", command, "--expect", "x", "--match", "DONE", code=2)
+            self.assertIn("appears in the command text", err)
+
     def test_confirmed_finding_needs_an_executed_check_to_be_disproved(self):
         self.setup_task(); art = self.home / "anything.txt"; art.write_text("I looked")
         self.cmd("finding", "add", "VALUE wrong", "--location", "subject.py:1", "--status", "confirmed")

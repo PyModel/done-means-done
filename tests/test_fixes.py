@@ -162,7 +162,7 @@ class BackgroundProcessCase(DmdFixture):
     """C4: a check that leaves a background process must not be forced to time out."""
 
     def test_background_holder_does_not_defeat_a_passing_check(self):
-        self.setup_task(command="sleep 45 & echo ACCEPTANCE_PASS:1", extra=["--timeout", "25"])
+        self.setup_task(command="sleep 45 & echo ACCEPTANCE_PASS:$((1))", extra=["--timeout", "25"])
         out, _ = self.cmd("run", "A-01")
         result = json.loads(out)
         self.assertEqual(result["result"], "PASS")
@@ -170,19 +170,19 @@ class BackgroundProcessCase(DmdFixture):
         self.assertLess(result["duration_s"], 30)
 
     def test_background_holder_is_recorded_in_the_receipt(self):
-        self.setup_task(command="sleep 45 & echo ACCEPTANCE_PASS:1", extra=["--timeout", "25"])
+        self.setup_task(command="sleep 45 & echo ACCEPTANCE_PASS:$((1))", extra=["--timeout", "25"])
         self.cmd("run", "A-01")
         out, _ = self.cmd("status", "--json")
         receipt = json.loads(out)["task"]["checks"][0]["receipt"]
         self.assertTrue(receipt["background_holders"])
 
     def test_a_genuinely_slow_command_still_times_out(self):
-        self.setup_task(command="sleep 30; echo ACCEPTANCE_PASS:1", extra=["--timeout", "3"])
+        self.setup_task(command="sleep 30; echo ACCEPTANCE_PASS:$((1))", extra=["--timeout", "3"])
         out, _ = self.cmd("run", "A-01", code=1)
         self.assertEqual(json.loads(out)["failure"], "TIMEOUT")
 
     def test_exit_status_is_still_taken_from_the_real_command(self):
-        self.setup_task(command="sleep 20 & echo ACCEPTANCE_PASS:1; exit 3", extra=["--timeout", "25"])
+        self.setup_task(command="sleep 20 & echo ACCEPTANCE_PASS:$((1)); exit 3", extra=["--timeout", "25"])
         out, _ = self.cmd("run", "A-01", code=1)
         self.assertEqual(json.loads(out)["exit"], 3)
 

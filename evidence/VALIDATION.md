@@ -6,16 +6,16 @@ Release: **Done Means Done 0.7.0**, prepared September 22, 2026 (this header nam
 
 | Check | Actual result | Evidence |
 |---|---|---|
-| `python3 -B tests/run.py` | **178 tests passed; 0 failures; 0 skipped.** A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
+| `python3 -B tests/run.py` | **306 tests passed; 0 failures; 0 skipped** (macOS Python 3.14.7 and 3.10; Linux Python 3.10 under dash). A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
 | `python3 -B examples/local-demo.py` | Actual subprocess CLI workflow: unapproved execution rejected; intentional red baseline; root-cause repair; green verification; finding closure; final review/gate/report; same-size preserved-mtime source mutation rejected; final repair/reverification; a solely attested requirement refused, then completed under recorded operator authority with the acceptance basis disclosed in the report. | [Local demonstration transcript](local-demo.log) |
 | `python3 -B tests/validate_package.py` | Python syntax parsed using the Python 3.10 grammar; required files, release identity, local Markdown links, code fences, skill size, real files/no symlinks and no bytecode-cache artifacts checked. | [Static package transcript](package-validation.log) |
-| YAML frontmatter parsed with PyYAML in the build environment | Correct single skill name, standard fields and version. PyYAML is not a runtime dependency. | [Metadata result](frontmatter-validation.log) |
-| `python3 -B bin/dmd --version` and subcommand help | Version 0.4.1; every documented command entrypoint accepts its help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
-| Final archive and SHA-256 manifest | ZIP CRC/member checks and every payload checksum verified; one `done-means-done/` root. No archived files from other skill packages, no symlinks or bytecode caches. | Distribution manifest `SHA256SUMS`; archive validation emitted during packaging |
+| YAML frontmatter parsed with PyYAML 6.0.3 (Docker `python:3.10`) | Correct single skill name, standard fields and version. PyYAML is not a runtime dependency. | [Metadata result](frontmatter-validation.log) |
+| `python3 -B bin/dmd --version` and subcommand help | Version 0.7.0; every documented command entrypoint accepts its help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
+| SHA-256 manifest | Every tracked file's checksum listed and verified with `shasum -a 256 -c SHA256SUMS`; no symlinks or bytecode caches. No archive was built for 0.7.0. | `SHA256SUMS` |
 
 The unit suite includes **synthetic predicate fixtures** and **actual CLI/filesystem/process/hook-contract/installer/migration tests**. Synthetic records test the acceptance predicate, not independent truth of software behavior. Hook payload fixtures test documented control responses, not a live host session.
 
-All installer tests used isolated temporary settings/state. Pre-fix failure transcripts (`adoption-before-fix.log`, `resume-before-fix.log`) are 0.3.0 artifacts, intentionally retained as regression evidence and explained in [remediations](REMEDIATIONS.md); they are not current failures. The transcripts in the table above were regenerated on macOS for 0.4.0.
+All installer tests used isolated temporary settings/state. Pre-fix failure transcripts (`adoption-before-fix.log`, `resume-before-fix.log`) are 0.3.0 artifacts, intentionally retained as regression evidence and explained in [remediations](REMEDIATIONS.md); they are not current failures. The transcripts in the table above were regenerated on macOS for 0.7.0.
 
 ## 0.4.0 defect-review verification
 
@@ -105,8 +105,9 @@ Trigger: an architecture review and a correctness/gaming review of 0.6.0. Every 
 | LessCeremonySameGuarantees / NoCheapExits / VolatileSource: one-call author-and-approve completes a task with no work items; an edit still forces reinspection; a confirmed finding needs an accepted executed check to be disproved; `req cancel` refuses to strand work; a stuck plan yields an action; a never-settling file is `volatile` drift with other files hashed as before | All pass |
 | Fingerprint compatibility: `source.fingerprint` of two unchanged trees computed by the 0.6.0 and 0.7.0 modules | Identical digests |
 | RunnerEdgeCase: slow cleanup output is read through the grace period (0.6.0 runner: output lost); the timeout-cleanup test traps TERM and passes under dash | All pass |
-| Full suite, macOS Python 3.14.7 and 3.10 | `DMD_TESTS_PASS:303;skipped=0`, [transcript](tests-final.log) |
-| Full suite, Linux (Docker `python:3.10`, Debian, `/bin/sh` = dash) | `DMD_TESTS_PASS:303;skipped=0` (0.6.0: 278/279) |
+| Full suite, macOS Python 3.14.7 and 3.10 | `DMD_TESTS_PASS:306;skipped=0`, [transcript](tests-final.log) |
+| Full suite, Linux (Docker `python:3.10`, Debian, `/bin/sh` = dash) | `DMD_TESTS_PASS:306;skipped=0` (0.6.0: 278/279) |
+| A match token inside the command text is refused (`cmd && echo TOKEN`, `print("TOKEN")`); a later session leaves a COMPLETE task's record byte-identical and creates no binding; a sibling worktree without its own task stays governed, one with its own task rebinds to it | All pass |
 | Real state on this machine: all 28 recorded tasks loaded and gated read-only by 0.6.0 and 0.7.0 code | Identical verdict distribution (22 ACTIVE, 4 PAUSED, 1 COMPLETE, 1 with a missing root); no load errors |
 
 Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7). Live Claude Code host integration was not re-tested for this release.

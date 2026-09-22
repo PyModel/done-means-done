@@ -62,7 +62,7 @@ class RuntimeCase(DmdFixture):
         self.setup_task(command='python3 -c "open(\'danger\',\'w\').write(\'x\')"')
         self.cmd("preview", "A-01"); self.cmd("status"); self.assertFalse((self.repo / "danger").exists())
     def test_source_mutated_by_check_is_rejected(self):
-        self.setup_task(command='python3 -c "open(\'new-source\',\'w\').write(\'x\'); print(\'ACCEPTANCE_PASS:1\')"')
+        self.setup_task(command='python3 -c "open(\'new-source\',\'w\').write(\'x\'); print(\'ACCEPTANCE_PASS:%d\' % 1)"')
         out, _ = self.cmd("run", "A-01", code=1); self.assertEqual(json.loads(out)["failure"], "CANDIDATE_OR_DEFINITION_CHANGED")
     def test_command_pass_cannot_be_manually_set(self):
         self.setup_task(); self.cmd("check", "set", "--id", "A-01", "--status", "PASS", "--note", "looks fine", code=2)
@@ -210,6 +210,14 @@ class RuntimeCase(DmdFixture):
         self.setup_task(); self.finalize(); self.cmd("config", "--mode", "enforce"); (self.repo / "subject.py").write_text("VALUE = 43\n")
         out, _ = self.cmd("hook", "stop", stdin=self.payload(session_id="later-session")); self.assertEqual(out, "")
         self.assertEqual(json.loads(self.cmd("gate", code=1)[0])["status"], "ACTIVE")
+    def test_later_session_leaves_a_complete_task_untouched(self):
+        self.setup_task(); self.finalize(); self.cmd("config", "--mode", "enforce"); d = locate(self.repo)
+        before = (d / "task.json").read_bytes()
+        for event in ("session-start", "post-tool-use", "stop"):
+            out, _ = self.cmd("hook", event, stdin=self.payload(session_id="later-session", tool_name="Bash")); self.assertEqual(out, "")
+        self.assertEqual(before, (d / "task.json").read_bytes())
+        from dmdlib.storage import digest
+        self.assertFalse((self.state / "sessions" / (digest("later-session") + ".json")).exists())
     def test_new_obligation_reopens_a_complete_task(self):
         self.setup_task(); self.finalize(); self.cmd("config", "--mode", "enforce")
         self.cmd("req", "add", "Follow-up outcome", "--anchor", "operator follow-up")

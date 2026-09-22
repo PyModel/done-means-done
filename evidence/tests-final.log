@@ -79,6 +79,7 @@ test_stale_coverage_on_an_unblocked_task_is_actionable (test_completion.BlockedM
 test_work_depending_on_blocked_work_waits_too (test_completion.BlockedMeansNothingActionable.test_work_depending_on_blocked_work_waits_too) ... ok
 test_author_and_approve_in_one_call (test_completion.LessCeremonySameGuarantees.test_author_and_approve_in_one_call) ... ok
 test_edit_after_one_call_approval_still_needs_inspection (test_completion.LessCeremonySameGuarantees.test_edit_after_one_call_approval_still_needs_inspection) ... ok
+test_a_match_token_inside_the_command_is_refused (test_completion.NoCheapExits.test_a_match_token_inside_the_command_is_refused) ... ok
 test_a_stuck_plan_is_an_action_not_a_dead_end (test_completion.NoCheapExits.test_a_stuck_plan_is_an_action_not_a_dead_end) ... ok
 test_cancelling_a_requirement_cannot_strand_dependent_work (test_completion.NoCheapExits.test_cancelling_a_requirement_cannot_strand_dependent_work) ... ok
 test_confirmed_finding_needs_an_executed_check_to_be_disproved (test_completion.NoCheapExits.test_confirmed_finding_needs_an_executed_check_to_be_disproved) ... ok
@@ -89,6 +90,8 @@ test_a_live_run_is_not_a_no_progress_loop (test_completion.StopGovernance.test_a
 test_accepted_evidence_is_progress (test_completion.StopGovernance.test_accepted_evidence_is_progress) ... ok
 test_adding_records_is_not_progress (test_completion.StopGovernance.test_adding_records_is_not_progress) ... ok
 test_cd_into_a_subdirectory_keeps_the_task_governing (test_completion.StopGovernance.test_cd_into_a_subdirectory_keeps_the_task_governing) ... ok
+test_sibling_worktree_follows_its_own_task_but_not_an_empty_one (test_completion.StopGovernance.test_sibling_worktree_follows_its_own_task_but_not_an_empty_one) ... │  No config files with names ["lefthook" ".lefthook" ".config/lefthook"] have been found in "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/tmp2nwsa9w2/project"
+ok
 test_unrelated_project_releases_the_binding (test_completion.StopGovernance.test_unrelated_project_releases_the_binding) ... ok
 test_task_completed_on_a_paused_task_does_not_reject_verified_work (test_completion.SuspendedTaskHooks.test_task_completed_on_a_paused_task_does_not_reject_verified_work) ... ok
 test_a_file_that_never_settles_is_drift_not_a_crash (test_completion.VolatileSource.test_a_file_that_never_settles_is_drift_not_a_crash) ... ok
@@ -272,6 +275,7 @@ test_hook_does_not_persist_raw_payload (test_runtime.RuntimeCase.test_hook_does_
 test_init_new_moves_the_session_to_the_new_assignment (test_runtime.RuntimeCase.test_init_new_moves_the_session_to_the_new_assignment) ... ok
 test_initialization_collision_cannot_overwrite (test_runtime.RuntimeCase.test_initialization_collision_cannot_overwrite) ... ok
 test_invalid_session_rejected_before_task_activation (test_runtime.RuntimeCase.test_invalid_session_rejected_before_task_activation) ... ok
+test_later_session_leaves_a_complete_task_untouched (test_runtime.RuntimeCase.test_later_session_leaves_a_complete_task_untouched) ... ok
 test_manual_evidence_requires_existing_file (test_runtime.RuntimeCase.test_manual_evidence_requires_existing_file) ... ok
 test_metadata_only_touch_does_not_stale_content (test_runtime.RuntimeCase.test_metadata_only_touch_does_not_stale_content) ... ok
 test_missing_declared_input_is_drift_not_a_crash (test_runtime.RuntimeCase.test_missing_declared_input_is_drift_not_a_crash) ... ok
@@ -304,7 +308,7 @@ test_watchdog_releases_the_stop_but_never_the_obligations (test_runtime.RuntimeC
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 303 tests in 76.628s
+Ran 306 tests in 121.308s
 
 OK
-DMD_TESTS_PASS:303;skipped=0
+DMD_TESTS_PASS:306;skipped=0

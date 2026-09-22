@@ -1,3 +1,6 @@
+$ dmd --version
+0.7.0
+$ dmd --help
 usage: dmd [-h] [--version] [--cwd CWD] [--task TASK] COMMAND ...
 
 Persistent obligations, strict remediation, verified completion
@@ -48,3 +51,4 @@ options:
   --version        show program's version number and exit
   --cwd CWD
   --task TASK
+CLI_HELP_PASS: 31 subcommands accept --help

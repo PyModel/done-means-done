@@ -1,6 +1,6 @@
 ---
 name: done-means-done
-description: Finish every part of a substantial assignment (code, research, writing, analysis or operations) against a durable ledger of the requested outcomes, executed evidence for each, every confirmed defect fixed, and a gate that alone decides done. Use for multi-part or multi-step work, exhaustive repairs, "finish everything" requests, and resuming an unfinished assignment. Resume the same task; never substitute a smaller one.
+description: Finish every part of a substantial assignment (code, research, writing, analysis or operations) against a durable ledger of the requested outcomes, executed evidence for each, every confirmed defect fixed, and a gate that alone decides done. Use for multi-part or multi-step work, exhaustive repairs, requests to finish everything, and resuming an unfinished assignment. Resume the same task; never substitute a smaller one.
 license: MIT
 compatibility: Python 3.10+ on macOS or Linux. Git is optional. Claude Code lifecycle hooks are optional and explicitly installed.
 metadata:
@@ -65,7 +65,7 @@ dmd check add --req R-01 --cmd "python3 -B tests/verify_export.py" \
   --match "EXPORT_OK" --input tests/verify_export.py --approve "read the verifier: 4 assertions, token last"
 ```
 
-The token has to come from real assertions. A check that only prints it proves nothing. Non-code deliverables still get executed checks: a script that confirms every requested section of a report exists, every cited source resolves, a dataset's row counts and invariants hold, a deployed endpoint answers. Use attestation (`--method manual|review|browser --attested-because ...`) only when nothing can observe the behavior from a command. See [verification](references/verification.md).
+The token has to come from real assertions; `dmd` refuses a token that appears in the command text itself (`tests && echo OK`). Non-code deliverables still get executed checks: a script that confirms every requested section of a report exists, every cited source resolves, a dataset's row counts and invariants hold, a deployed endpoint answers. Use attestation (`--method manual|review|browser --attested-because ...`) only when nothing can observe the behavior from a command. See [verification](references/verification.md).
 
 **Done when:** every requirement has a check that would fail if its outcome were missing.
 

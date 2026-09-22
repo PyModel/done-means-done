@@ -469,6 +469,12 @@ def check(args):
                     raise DmdError("--attested-because applies only to manual, review or browser checks")
                 if trivial_command(c["command"]):
                     raise DmdError("a bare success printer is not an acceptance check")
+                if c.get("match") and c["match"] in (c.get("command") or ""):
+                    # `tests && echo TOKEN` or `python3 -c 'print("TOKEN")'` reduces to an exit
+                    # status, which the literal match exists to go beyond.
+                    raise DmdError(f"--match {c['match']!r} appears in the command text, so the command prints it without "
+                                   "observing anything. Match a string the verifier's own output emits after its assertions "
+                                   "(a test runner's summary line, a script's final print)")
             if args.approve is not None:
                 # One call for author-and-approve. The inspection it attests is the same as
                 # dmd approve; an edit still clears it, so edited text never runs uninspected.

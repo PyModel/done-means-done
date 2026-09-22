@@ -122,7 +122,7 @@ class StaleCase(GitFixture):
     """S2: a command that passed against a tree that then moved is STALE, with the diff."""
     def test_candidate_moved_is_reported_as_stale_with_drift(self):
         self.linked_worktree()
-        self.setup_task(command='python3 -c "open(\'new-source\',\'w\').write(\'x\'); print(\'ACCEPTANCE_PASS:1\')"')
+        self.setup_task(command='python3 -c "open(\'new-source\',\'w\').write(\'x\'); print(\'ACCEPTANCE_PASS:%d\' % 1)"')
         out, _ = self.cmd("run", "A-01", *QUIET, code=1)
         row = json.loads(out)
         self.assertEqual(row["result"], "STALE"); self.assertEqual(row["failure"], "CANDIDATE_OR_DEFINITION_CHANGED")
@@ -191,7 +191,7 @@ class BatchCase(GitFixture):
 
     def test_one_window_makes_a_mid_sequence_move_stale_for_every_check(self):
         self.setup_task()
-        cid = self.add_check(self.repo, command='python3 -c "open(\'moved\',\'w\').write(\'x\'); print(\'ACCEPTANCE_PASS:1\')"')
+        cid = self.add_check(self.repo, command='python3 -c "open(\'moved\',\'w\').write(\'x\'); print(\'ACCEPTANCE_PASS:%d\' % 1)"')
         lines = [json.loads(x) for x in self.cmd("run", "A-01", cid, *QUIET, code=1)[0].strip().splitlines()]
         self.assertEqual([r["result"] for r in lines[:2]], ["STALE", "STALE"])
         self.assertIn(str(self.repo.resolve()), lines[2]["window"]["moved"])

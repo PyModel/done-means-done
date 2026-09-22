@@ -51,9 +51,17 @@ def related(task, directory, cwd):
     if any(here == tree or tree in here.parents for tree in trees):
         return True
     try:
-        return identity(cwd)[1] == directory.parent.parent.name
+        if identity(cwd)[1] != directory.parent.parent.name:
+            return False
+        # A sibling worktree that holds its own assignment belongs to that assignment.
+        return lookup(cwd) in (None, directory)
     except (DmdError, OSError):
         return False
+
+
+def finished(directory):
+    from .cli import load_task
+    return load_task(directory)["state"] == "COMPLETE"
 
 
 def remember_session(task, session):
@@ -142,11 +150,15 @@ def _handle(args):
                           f"this worktree is {safe_text(cwd, 300)}, so that binding was released.")
     if directory is None:
         directory = lookup(cwd)
+        if directory and finished(directory):
+            return 0
         if directory:
             bind_session(directory, session)
         elif notice:
             print(json.dumps({"systemMessage": notice + " No task is active here."}))
-    if directory is None:
+    if directory is None or finished(directory):
+        # A finished assignment is not this session's work: no binding, no bookkeeping,
+        # no enforcement. A contract change reopens it through the CLI, not a hook.
         return 0
     if args.event in ("post-tool-use", "post-tool-failure"):
         # Bookkeeping only. A contended lock (the agent is mid `dmd run`) must not surface

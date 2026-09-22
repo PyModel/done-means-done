@@ -12,6 +12,8 @@ Freedom. Work items are optional: a check may map straight to its requirement. A
 
 Also fixed: a timed-out or cancelled check stopped reading output one poll after SIGTERM, so the documented two-second cleanup window captured nothing slower than about 0.1 s. It now reads through the grace period. The timeout-cleanup test now traps TERM and passes under dash, where 0.6.0 had 278/279 on Debian. An approval binds the interpreter by major.minor, so a Python patch upgrade no longer expires every approval; approvals recorded in the old full-version form are still honoured. Command output is printed only after its mutation is saved. Check and work history, review log, recovery records and attempt histories are capped at 50 entries (the evidence files and `events.jsonl` keep everything). Unused imports were removed.
 
+A command whose text contains its own `--match` token (`npm test && echo OK`, `python3 -c 'print("OK")'`) is refused, because it reduces to an exit status. A later session leaves a finished task's record byte-identical and creates no binding. A sibling worktree that has its own active task takes the session over from the bound task; one without a task stays governed. The three reversals of tested 0.6.0 behavior are recorded in `docs/adr/0001-completion-contract-reversals.md`.
+
 Renamed: the `summary.checks.unapproved` bucket is `edited`, which is what it always held. A work item's reason reads `W-01: checks owed: A-01` in place of the status-based wording.
 
 ## 0.6.0 — 2026-09-13
