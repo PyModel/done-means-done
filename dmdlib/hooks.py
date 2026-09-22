@@ -4,7 +4,11 @@ import json
 import sys
 from pathlib import Path
 from .storage import DmdError, atomic, digest, lock, now, read_json, safe_text, save
-from .model import evaluate, task_fingerprint, get
+from .model import check_candidate, evaluate, live, task_fingerprint
+from .source import identity
+from .store import (StateInsideProject, bind_session, binding_path, load_config, load_task, locate, remember_session,
+                    state_root)
+from .report import render
 
 
 def outstanding(g, limit=3):
@@ -24,7 +28,6 @@ def outstanding(g, limit=3):
 
 # Bounded per-task bookkeeping: a long-lived task must never grow its record until the
 # 16 MiB save limit turns every later mutation into a failure.
-MAX_SESSIONS = 50
 MAX_WATCHDOGS = 50
 
 
@@ -33,7 +36,6 @@ def lookup(cwd, task_id=None):
     is gone or is a file, the state root lies inside it (a session started outside any
     checkout), the checkout moved, or the record is unreadable. None of these is a defect
     the host should see as a hook failure; the CLI still reports them precisely."""
-    from .cli import locate
     try:
         return locate(cwd, task_id)
     except (DmdError, OSError):
@@ -44,8 +46,6 @@ def related(task, directory, cwd):
     """Whether a bound session's cwd still belongs to its task: inside the task root or a
     check's candidate tree (a subdirectory, a scratch checkout), or another worktree of the
     same repository. Only an unrelated project releases the binding."""
-    from .source import identity
-    from .model import check_candidate, live
     here = Path(cwd).resolve()
     trees = {Path(task["root"])} | {Path(check_candidate(c, task["root"])) for c in live(task["checks"])}
     if any(here == tree or tree in here.parents for tree in trees):
@@ -60,19 +60,7 @@ def related(task, directory, cwd):
 
 
 def finished(directory):
-    from .cli import load_task
     return load_task(directory)["state"] == "COMPLETE"
-
-
-def remember_session(task, session):
-    """Record the session by hash, bounded. Raw host session IDs are not needed in the record."""
-    key = digest(session)
-    sessions = task.setdefault("sessions", [])
-    if session in sessions or key in sessions:
-        return
-    sessions.append(key)
-    if len(sessions) > MAX_SESSIONS:
-        del sessions[:-MAX_SESSIONS]
 
 
 def handle(args):
@@ -92,15 +80,11 @@ def handle(args):
 
 
 def _handle(args):
-    from .cli import state_root, load_task, bind_session, render, locate, StateInsideProject
     root = state_root()
-    config_path = root / "config.json"
-    config = read_json(config_path) if config_path.exists() else {"mode": "observe", "max_no_progress": 6}
+    config = load_config()
     mode = config.get("mode", "observe")
     if mode == "off":
         return 0
-    if mode not in ("observe", "enforce"):
-        raise DmdError("invalid hook mode; choose off, observe or enforce")
     stream = getattr(sys.stdin, "buffer", None)
     raw = stream.read(1048577) if stream is not None else sys.stdin.read(1048577).encode("utf-8", "replace")
     if len(raw) > 1048576:
@@ -118,7 +102,7 @@ def _handle(args):
         return 0
     directory = None
     notice = None
-    binding = root / "sessions" / (digest(session) + ".json")
+    binding = binding_path(session)
     if binding.exists():
         d = Path(read_json(binding)["task_dir"])
         if not d.is_absolute() or not d.resolve().is_relative_to((root / "v2").resolve()):
@@ -248,8 +232,6 @@ def _handle(args):
             print(json.dumps({"systemMessage": "Done Means Done: every remaining obligation waits on a recorded blocker. Report the exact prerequisites and saved handoff."}))
             return 0
         cap = config.get("max_no_progress", 6)
-        if not isinstance(cap, int) or not 1 <= cap <= 6:
-            raise DmdError("invalid no-progress safeguard configuration")
         if count > cap:
             # Release this stop, never the obligations: the task stays ACTIVE and governs the
             # next session, which is told why the previous one ended. Pausing here used to let

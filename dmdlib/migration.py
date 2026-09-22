@@ -1,12 +1,12 @@
 """Explicit copy-only import of schema-1 assignments. No historical green is trusted."""
 import re
 from pathlib import Path
-from .storage import DmdError, lock, read_json, save, evidence
 import json
+from .storage import DmdError, lock, read_json, save, evidence
 from .model import new_id
+from .store import create_task, require_text
 
 def migrate(args):
-    from .cli import create_task, require_text
     source = Path(args.from_task).expanduser()
     old = read_json(source)
     if not isinstance(old, dict) or old.get("schema") != 1:
@@ -72,7 +72,7 @@ def migrate(args):
             raise DmdError(f"legacy record is malformed: {exc!r}") from exc
     # Transform and validate in memory before replacing the active pointer or
     # pausing any pre-existing assignment. An invalid import has no task effects.
-    directory, t = create_task(args, request, args.authority, prepare=guarded)
+    directory, t = create_task(args.cwd, args.task, request, args.authority, new=args.new, prepare=guarded)
     with lock(directory):
         t["migration"]["archived_record"] = evidence(directory, json.dumps(old, indent=2), "legacy")
         save(directory, t, "migration.import", accepted_historical_checks=0)

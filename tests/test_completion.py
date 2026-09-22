@@ -277,3 +277,20 @@ class VolatileSource(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoreBoundary(unittest.TestCase):
+    """ADR 0002: the CLI is a leaf. Hooks and migration reach the store directly."""
+    def test_no_module_imports_the_cli(self):
+        import ast
+        from pathlib import Path
+        pkg = Path(__file__).resolve().parents[1] / "dmdlib"
+        offenders = []
+        for path in pkg.glob("*.py"):
+            if path.name == "cli.py":
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.ImportFrom) and node.module in ("cli", "dmdlib.cli") or \
+                   isinstance(node, ast.ImportFrom) and node.level == 1 and node.module == "cli":
+                    offenders.append(path.name)
+        self.assertEqual(offenders, [])
