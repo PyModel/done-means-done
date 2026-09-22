@@ -4,7 +4,7 @@ description: Finish every part of a substantial assignment (code, research, writ
 license: MIT
 compatibility: Python 3.10+ on macOS or Linux. Git is optional. Claude Code lifecycle hooks are optional and explicitly installed.
 metadata:
-  version: "0.7.0"
+  version: "0.7.1"
 ---
 
 # Done Means Done
@@ -99,7 +99,7 @@ Order findings by severity; every one gets resolved. Keep the operator's uncommi
 
 ### 5. Close
 
-Reread the original request. Inspect the actual final diff and the integrated candidate, not isolated pieces. Leave the workspace as you would hand it over: stop every process you started (dev servers, watchers, containers), remove scratch files, temporary directories, experiment branches and worktrees you created. Every untracked file left (the report's *Possible leftovers* lists them) is a deliverable you name in the report; remove the rest. Rerun checks after the final integration and cleanup. Then:
+Reread the original request. Inspect the actual final diff and the integrated candidate, not isolated pieces. Leave the workspace as you would hand it over: stop every process you started (dev servers, watchers, containers), remove scratch files, temporary directories, experiment branches and worktrees you created. Nothing of yours goes under `DMD_STATE`; pass evidence with `--evidence -`. Every untracked file left (the report's *Possible leftovers* lists them) is a deliverable you name in the report; remove the rest. Rerun checks after the final integration and cleanup. Then:
 
 ```bash
 dmd coverage assert --note "final reconciliation against the original request"

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 — 2026-09-22
+
+Housekeeping. Found while cleaning the state root of a machine running 0.6.0 and 0.7.0.
+
+- A lookup no longer creates directories. Every hook call from a folder with no task used to create an empty `v2/<project>/<worktree>` directory, and one machine had 39 of them. Only `init` and `relocate` create a record directory now. `dmd gc` removes the empty ones older versions left, reported as `empty_record_directories_removed`.
+- Nothing is written into the state root by hand. The examples in the command reference passed evidence as `/absolute/outside-project/*.txt`, and agents wrote those files into `DMD_STATE`, the one directory outside every project, where they mixed with other projects' files. Every example now uses `--evidence -` with a heredoc, since `dmd` keeps its own copy. The command reference and SKILL.md say that nothing of the agent's goes under `DMD_STATE`.
+- `dmd next` for a regression check with no red baseline names all three ways forward: `run --red`, `check baseline --evidence -`, or `check edit --no-regression` when the check reproduces no specific defect. A live session had flagged a whole-suite check as a regression and could not tell how to clear it.
+
 ## 0.7.0 — 2026-09-22
 
 Strict on outcomes, free on method. Two read-only audits (architecture, and correctness/failure/gaming) found ways for an agent to stop before the work was done and places where the tool demanded ceremony that proved nothing. This release closes the first and removes the second.

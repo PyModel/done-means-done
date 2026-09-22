@@ -400,6 +400,14 @@ class NextActionsAreRunnable(test_runtime.DmdFixture):
         self.assertEqual(self.commands(), ["review"])
 
 
+    def test_a_regression_check_without_a_baseline_names_every_way_out(self):
+        self.cmd("init", "-m", "x", "--authority", "operator"); self.cmd("req", "add", "outcome", "--anchor", "request")
+        self.cmd("check", "add", "--req", "R-01", "--cmd", "python3 -B verify.py", "--expect", "x", "--match", "ACCEPTANCE_PASS:1",
+                 "--regression", "--red-match", "BROKEN", "--approve", "inspected")
+        action = next(a["action"] for a in json.loads(self.cmd("next")[0])["next"] if a["id"] == "A-01")
+        for part in ("dmd run A-01 --red", "--evidence -", "dmd check edit --id A-01 --no-regression"):
+            self.assertIn(part, action)
+
 class OperatorDecisions(test_runtime.DmdFixture):
     """R1: `--authority` is text the agent types. With a confirmation channel (hooks in
     enforce mode with PreToolUse registered) a contract change counts only once the host
@@ -541,6 +549,25 @@ class NoLeftovers(test_runtime.DmdFixture):
         self.setup_task(); (self.repo / "scratch-notes.txt").write_text("tmp")
         out, _ = self.cmd("report", "--only", "leftovers")
         self.assertIn("untracked: scratch-notes.txt", out)
+
+    def test_a_folder_without_a_task_leaves_nothing_in_the_state_root(self):
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        payload = json.dumps({"session_id": "s", "hook_event_name": "Stop", "cwd": str(self.repo)})
+        for event in ("session-start", "stop", "post-tool-use", "pre-tool-use"):
+            self.cmd("hook", event, stdin=payload)
+        self.cmd("next", code=2)
+        self.assertFalse((self.state / "v2").exists(), sorted(str(p) for p in self.state.rglob("*")))
+
+    def test_gc_removes_empty_record_directories_only(self):
+        import os, time
+        self.setup_task()
+        empty = self.state / "v2" / "p" / "w"; empty.mkdir(parents=True, mode=0o700)
+        for d in (empty, empty.parent):
+            os.utime(d, (time.time() - 3600,) * 2)
+        out, _ = self.cmd("gc")
+        self.assertEqual(json.loads(out)["empty_record_directories_removed"], 2)
+        self.assertFalse(empty.parent.exists()); self.assertTrue(locate(self.repo))
 
     def test_gc_prunes_stale_confirmation_tickets(self):
         import os, time

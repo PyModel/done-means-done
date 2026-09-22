@@ -1,16 +1,16 @@
 # Validation report
 
-Release: **Done Means Done 0.7.0**, prepared September 22, 2026 (this header names the current release; the sections below are cumulative). The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
+Release: **Done Means Done 0.7.1**, prepared September 22, 2026 (this header names the current release; the sections below are cumulative). The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
 
 ## Executed verification
 
 | Check | Actual result | Evidence |
 |---|---|---|
-| `python3 -B tests/run.py` | **338 tests passed; 0 failures; 0 skipped** (macOS Python 3.14.7 and 3.10; Linux Python 3.10 under dash). A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
+| `python3 -B tests/run.py` | **341 tests passed; 0 failures; 0 skipped** (macOS Python 3.14.7 and 3.10; Linux Python 3.10 under dash). A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
 | `python3 -B examples/local-demo.py` | Actual subprocess CLI workflow: unapproved execution rejected; intentional red baseline; root-cause repair; green verification; finding closure; final review/gate/report; same-size preserved-mtime source mutation rejected; final repair/reverification; a solely attested requirement refused, then completed under recorded operator authority with the acceptance basis disclosed in the report; temporary fixtures removed. | [Local demonstration transcript](local-demo.log) |
 | `python3 -B tests/validate_package.py` | Python syntax parsed using the Python 3.10 grammar; required files, release identity, local Markdown links, code fences, skill size, real files/no symlinks and no bytecode-cache artifacts checked. | [Static package transcript](package-validation.log) |
 | YAML frontmatter parsed with PyYAML 6.0.3 (Docker `python:3.10`) | Correct single skill name, standard fields and version. PyYAML is not a runtime dependency. | [Metadata result](frontmatter-validation.log) |
-| `python3 -B bin/dmd --version` and subcommand help | Version 0.7.0; all 32 subcommands accept their help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
+| `python3 -B bin/dmd --version` and subcommand help | Version 0.7.1; all 32 subcommands accept their help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
 | Live Claude Code host (2.1.280, model haiku, isolated settings) | 7/7 scenarios pass: SessionStart context reaches the model; enforce-mode Stop blocks and the agent follows `dmd next`; the watchdog releases; observe mode never blocks; an operator decision is denied without a prompt channel, recorded as confirmed once approved through a permission-prompt tool, and still caught in a `python -c` argv-list form. Total cost $0.17. | [Live host transcript](live-host.log) |
 | SHA-256 manifest | Every tracked file's checksum listed and verified with `shasum -a 256 -c SHA256SUMS`; no symlinks or bytecode caches. No archive was built for 0.7.0. | `SHA256SUMS` |
 
@@ -134,3 +134,15 @@ Trigger: the remaining items of the same review (operator authority, check outpu
 
 Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7).
 
+## 0.7.1 housekeeping verification
+
+Trigger: cleaning the state root of this machine found 39 empty record directories and agent-written evidence files sitting directly in `DMD_STATE`. A live session in another project was stuck on a whole-suite check flagged `--regression`.
+
+| Check | Result |
+|---|---|
+| `NoLeftovers.test_a_folder_without_a_task_leaves_nothing_in_the_state_root`: SessionStart, Stop, PostToolUse, PreToolUse and `next` from a Git folder with no task | No `v2/` directory is created (on 0.7.0 code: `v2/<project>/<worktree>` appeared) |
+| `NoLeftovers.test_gc_removes_empty_record_directories_only` | `gc` removes an empty project/worktree pair older than a minute; the live task's directory is untouched |
+| `NextActionsAreRunnable.test_a_regression_check_without_a_baseline_names_every_way_out` | The action names `run --red`, `check baseline --evidence -` and `check edit --no-regression` |
+| Full suite, macOS Python 3.14.7; Linux Docker `python:3.10` | `DMD_TESTS_PASS:341;skipped=0`, [transcript](tests-final.log) |
+
+Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7).

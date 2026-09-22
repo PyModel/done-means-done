@@ -20,7 +20,7 @@ from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, accept
                     candidate_outputs, contract_digest, extract_clauses, gate, get, live, unmapped_clauses, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, work_ok)
 from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
-from .store import (StateInsideProject, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
+from .store import (StateInsideProject, prune_empty_record_dirs, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
                     DEFAULT_CONFIG, authority_channel, prune_run_index, prune_tickets, index_run, pid_alive, prune_sessions, remember_session, unindex_run, withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
 from .authority import effective, find, record, terminal_confirms, withdraw as authority_withdraw
@@ -31,12 +31,6 @@ SETTLE_SECONDS = 3.0
 # Bounded run history per check; every run's evidence file stays on disk.
 MAX_RUNS_PER_CHECK = 50
 EXCLUSIVE_WAIT_SECONDS = 600.0
-
-
-
-
-
-
 
 
 def need(args):
@@ -60,21 +54,10 @@ def edit(args, kind):
     sys.stdout.write(out.getvalue())
 
 
-
-
-
-
-
-
-
-
-
 def artifact_from_file(directory, path):
     if path is None:
         raise DmdError("--evidence is required: record the actual observation artifact")
     return evidence(directory, read_operator_file(path, "--evidence"), "review")
-
-
 
 
 def read_operator_file(path, name):
@@ -415,10 +398,6 @@ def preview(args):
     print(json.dumps({"definition": check_definition(c), "shell": SHELL,
                       "path_fingerprint": digest(os.environ.get("PATH", "")),
                       "instruction": "Inspect the command and every called script. Approval is an operator-authorized action, not implied by a ledger."}, indent=2))
-
-
-
-
 
 
 def preflight(t, checks, window):
@@ -844,11 +823,6 @@ def review(args):
     print("final review recorded")
 
 
-
-
-
-
-
 def inspect_task(args):
     directory = need(args)
     with lock(directory):
@@ -1055,12 +1029,13 @@ def gc(args):
     removed = prune_sessions()
     tickets = prune_tickets()
     runs = prune_run_index()
+    empty = prune_empty_record_dirs()
     finished = []
     for directory, t in task_records():
         if isinstance(t, dict) and t["state"] in ("COMPLETE", "CANCELLED"):
             finished.append({"task_id": t["task_id"], "state": t["state"], "root": t["root"], "path": str(directory)})
     print(json.dumps({"session_bindings_removed": removed, "stale_confirmation_tickets_removed": tickets,
-                      "orphaned_run_index_entries_removed": runs, "finished_tasks": finished,
+                      "orphaned_run_index_entries_removed": runs, "empty_record_directories_removed": empty, "finished_tasks": finished,
                       "note": "finished task directories are listed, not deleted; remove them explicitly if their evidence is no longer needed"}, indent=2))
     return 0
 
@@ -1090,7 +1065,7 @@ def relocate(args):
         old_root = t["root"]
         if old_root == str(new_root):
             raise DmdError("task already lives at that root")
-        base, root = base_dir(new_root)
+        base, root = base_dir(new_root, create=True)
         if str(root) != str(new_root):
             raise DmdError(f"--to must be the checkout root ({root}), not a subdirectory")
         new_dir = base / t["task_id"]

@@ -8,6 +8,8 @@ dmd --cwd /absolute/project --task T-actual-id status --json
 
 Paths are resolved on the current machine. Symlinked state and settings *directories* are canonicalized to their physical location, so a dotfiles layout and the macOS `/tmp` and `/var` aliases work; a settings *file* that is itself a symlink is still refused, because replacing it would destroy the link. Task/session identity belongs to a real assignment, not a guessed string.
 
+Every `--evidence` and `--request-file` accepts `-` to read standard input (a heredoc); `dmd` stores its own copy inside the task record. Write nothing of your own under `DMD_STATE`: it holds only what `dmd` writes, one directory per worktree. If an artifact has to exist as a file first, put it in the host's scratch directory or a `mktemp -d` and delete it after recording it.
+
 ## Assignment and requirements
 
 | Command | Contract |
@@ -115,7 +117,9 @@ When safely reproducing the baseline is genuinely unavailable:
 
 ```bash
 dmd check baseline --id A-01 --note "Exact limitation and equivalent evidence" \
-  --evidence /absolute/outside-project/baseline-analysis.txt
+  --evidence - <<'EVIDENCE'
+<the limitation and the equivalent evidence you examined>
+EVIDENCE
 ```
 
 This is an explicit evidence-backed limitation, not a waiver of green verification or required behavior.
@@ -127,7 +131,9 @@ dmd check add --req R-01 --work W-01 --method browser \
   --expect "Actual rendered interaction is inspected on the declared viewport" \
   --attested-because "A rendered viewport cannot be asserted from command output"
 dmd check set --id A-02 --status PASS --note "Actual observed result and environment" \
-  --evidence /absolute/outside-project/browser-observation.txt
+  --evidence - <<'EVIDENCE'
+<what you observed, the viewport, and the saved screenshot paths>
+EVIDENCE
 ```
 
 Methods are `command`, `manual`, `review`, and `browser`. Manual artifacts must exist, be nonempty, and fit 1 MiB. Binary screenshots should be described in an observation artifact with their actual saved paths/content identity. The runtime does not open browsers or verify screenshot semantics. Command checks cannot be hand-marked PASS. Required skips/NOT_APPLICABLE are rejected.
@@ -141,7 +147,9 @@ dmd finding set --id F-01 --status confirmed --note "Observed reproducer confirm
 dmd finding set --id F-01 --status fixed-verified --work W-02 --check A-02 \
   --note "Root cause and affected callers fixed; regression and integration evidence accepted"
 dmd finding set --id F-02 --status disproved --note "Evidence demonstrates correct behavior" \
-  --evidence /absolute/outside-project/disproof.txt
+  --evidence - <<'EVIDENCE'
+<the trace or output showing the invariant holds>
+EVIDENCE
 dmd finding set --id F-03 --status duplicate --duplicate F-01 --note "Same root cause and invariant"
 dmd finding defer --id F-04 --authority "Operator: vendor bug, tracked upstream as #123" \
   --note "Fix belongs to the dependency; workaround is not authorized"
@@ -180,7 +188,9 @@ dmd --help          # every subcommand with a one-line description; dmd COMMAND 
 ```bash
 dmd review --kind independent --reviewer "Actual reviewer identity" \
   --note "Original request, assertions, final diff and integrated result reviewed" \
-  --evidence /absolute/outside-project/review.txt     # or --evidence - to read it from stdin
+  --evidence - <<'REVIEW'
+<what you compared: request, diff, integrated result, findings>
+REVIEW
 dmd gate
 dmd report --save
 dmd reconcile
@@ -217,7 +227,7 @@ dmd migrate --from-task /absolute/legacy/task.json --authority "Operator approve
 ```bash
 dmd doctor                      # exit 1 when anything needs attention; names the repair
 dmd list --json --state ACTIVE --state PAUSED
-dmd gc                          # removes dead bindings, stale confirmation tickets, orphaned run-index entries; lists finished tasks, deletes none
+dmd gc                          # removes dead bindings, stale confirmation tickets, orphaned run-index entries and empty record directories; lists finished tasks, deletes none
 dmd --task T-id relocate --to /new/checkout/root --authority "Operator moved the checkout"
 dmd check edit --id A-01 --clear-inputs        # drop every declared --input
 dmd check edit --id A-01 --clear-exclusive

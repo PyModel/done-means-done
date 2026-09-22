@@ -25,14 +25,17 @@ class StateInsideProject(DmdError):
     """The state root lies inside the tree that would be verified. No task can exist for
     that tree by construction, so hooks treat it as 'no task here' rather than a failure."""
 
-def base_dir(cwd):
+def base_dir(cwd, create=False):
+    """The worktree's record directory. Only creating or relocating a task makes it: a
+    lookup from a folder with no task leaves nothing behind in the state root."""
     root, project, worktree = identity(cwd)
     state = state_root()
     if state == root or state.is_relative_to(root):
         why = ("" if git_root(root) else f"; {root} is not a Git checkout, so it is treated as the project root")
         raise StateInsideProject(f"DMD_STATE ({state}) must remain outside the project being verified ({root}){why}. "
                                  "Run dmd inside the project checkout, or point DMD_STATE elsewhere")
-    return private_dir(state / "v2" / project / worktree), root
+    path = state / "v2" / project / worktree
+    return (private_dir(path) if create or path.exists() else path), root
 
 def load_task(directory):
     t = read_json(directory / "task.json")
@@ -248,7 +251,7 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
     is superseded (paused) only when `new` is set; its sessions follow the new task."""
     if session is not None and not 1 <= len(session) <= 512:
         raise DmdError("a host session ID of 1..512 characters is required")
-    base, root = base_dir(cwd)
+    base, root = base_dir(cwd, create=True)
     task_id = ident(task_id or "T-" + uuid.uuid4().hex)
     directory = base / task_id
     t = {"schema": SCHEMA, "version": __version__, "task_id": task_id, "root": str(root),
@@ -374,6 +377,23 @@ def prune_tickets(max_age=TICKET_TTL_SECONDS):
         with contextlib.suppress(OSError):
             if time.time() - ticket.stat().st_mtime > max_age:
                 ticket.unlink(); removed += 1
+    return removed
+
+def prune_empty_record_dirs(min_age=60):
+    """Remove project and worktree directories that hold nothing (left by versions before
+    0.7.1, which created them on every lookup). A directory younger than `min_age` seconds
+    may belong to a task being created right now and is kept."""
+    removed = 0
+    top = state_root() / "v2"
+    for project in sorted(top.iterdir()) if top.is_dir() else []:
+        if not project.is_dir() or project.is_symlink():
+            continue
+        # Ages are read first: removing a worktree directory refreshes its project's mtime.
+        old = [d for d in [*sorted(project.iterdir()), project]
+               if d.is_dir() and not d.is_symlink() and time.time() - d.stat().st_mtime > min_age]
+        for directory in old:
+            with contextlib.suppress(OSError):
+                directory.rmdir(); removed += 1  # refused, and skipped, unless empty
     return removed
 
 def other_runs(task_id, candidates):

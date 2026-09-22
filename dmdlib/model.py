@@ -676,7 +676,8 @@ class Assessment:
             action = ""
         if c.get("regression") and not self.red.get(cid):
             red = (f"record the red baseline against the faulty code: dmd run {cid} --red (or, when that code is gone, "
-                   f"dmd check baseline --id {cid} --note '<why>' --evidence <file>)")
+                   f"dmd check baseline --id {cid} --note '<why>' --evidence - with the analysis on stdin; if {cid} "
+                   f"reproduces no specific defect, dmd check edit --id {cid} --no-regression)")
             action = f"{action}; {red}" if action else red
         return action
 
@@ -685,7 +686,7 @@ class Assessment:
         reason = self.findings.get(fid, "")
         if f["status"] == "suspected":
             return (f"investigate, then dmd finding set --id {fid} --status confirmed (with the evidence), or --status disproved "
-                    f"--note '<what shows the invariant holds>' --evidence <file>")
+                    f"--note '<what shows the invariant holds>' --evidence - (the trace on stdin)")
         if f["status"] in ("confirmed", "fixed-unverified"):
             return (f"fix it with a regression check: dmd check add --req R-XX --cmd '<test>' --expect '<invariant>' --match '<pass token>' "
                     f"--regression --red-match '<failure token>' --approve '<inspected>'; dmd run A-XX --red; fix the root cause; "
