@@ -42,7 +42,7 @@ class AdoptionCase(unittest.TestCase):
     def test_preview_creates_no_state_or_settings(self):
         p = self.install(); self.assertTrue(json.loads(p.stdout)['preview']); self.assertFalse(self.state.exists()); self.assertFalse(self.settings.parent.exists())
     def test_first_install_creates_valid_settings(self):
-        self.install('--apply'); data = json.loads(self.settings.read_text()); self.assertEqual(len(data['hooks']), 5)
+        self.install('--apply'); data = json.loads(self.settings.read_text()); self.assertEqual(len(data['hooks']), 6); self.assertEqual(data['hooks']['PreToolUse'][0]['matcher'], 'Bash')
         self.assertNotIn('matcher', data['hooks']['TaskCompleted'][0])
     def test_repeat_install_is_idempotent(self):
         self.install('--apply'); before = self.settings.read_bytes(); self.install('--apply'); self.assertEqual(before, self.settings.read_bytes())
@@ -72,7 +72,7 @@ class AdoptionCase(unittest.TestCase):
         # not be a symlink, and write_settings still requires this user to own the directory.
         real = self.home/'real'; real.mkdir(); (real/'settings.json').write_text('{}'); self.settings.parent.symlink_to(real, target_is_directory=True)
         self.install(code=0); self.assertFalse(self.state.exists())
-        self.install('--apply'); d = json.loads((real/'settings.json').read_text()); self.assertEqual(len(d['hooks']), 5)
+        self.install('--apply'); d = json.loads((real/'settings.json').read_text()); self.assertEqual(len(d['hooks']), 6)
         self.assertFalse((real/'settings.json').is_symlink())
     def test_state_dir_under_a_symlinked_ancestor_installs(self):
         real = self.home/'real-state'; real.mkdir(); link = self.home/'linked-state'; link.symlink_to(real, target_is_directory=True)

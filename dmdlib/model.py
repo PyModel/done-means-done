@@ -5,6 +5,7 @@ from collections import deque
 from pathlib import Path
 from .storage import DmdError, digest, evidence_ok
 from .source import file_digest, snapshot, MissingCandidate
+from .authority import undisclosed, unconfirmed
 
 SCHEMA = 2
 TASK_STATES = {"ACTIVE", "PAUSED", "BLOCKED", "CANCELLED", "COMPLETE"}
@@ -572,6 +573,8 @@ class Assessment:
                 self._add(u["id"], f"{u['id']}: unknown external outcome")
         if t.get("running"):
             self._add("running", "running: verification still active or its outcome needs recovery")
+        for e in unconfirmed(t):
+            self._add(e["id"], f"{e['id']}: {e['op']} {e['target']} awaits the operator's confirmation")
 
     def review_reason(self, require_review=True):
         if not require_review:
@@ -587,7 +590,10 @@ class Assessment:
         """Owners of reasons the agent can act on now. Blocker records themselves are what
         waits; the final review is actionable only once nothing else is open."""
         open_blockers = {b["id"] for b in self.t["blockers"] if not b.get("resolved")}
-        return [(owner, text) for owner, text in self.reasons if owner not in open_blockers and not self.waits(owner)]
+        # An operator decision awaiting confirmation never waits on a blocker: a recorded
+        # blocker must not turn an unconfirmed cancellation into a way out.
+        return [(owner, text) for owner, text in self.reasons
+                if owner.startswith("AU-") or (owner not in open_blockers and not self.waits(owner))]
 
     # Views -----------------------------------------------------------------------------
     def next_actions(self):
@@ -617,6 +623,9 @@ class Assessment:
                 action = "record each requested outcome: dmd req add '<outcome>' --anchor '<quote from the request>'"
             elif owner == "running":
                 action = "inspect the interrupted run's effects, then dmd recover-run --proof '<what you verified>'"
+            elif owner.startswith("AU-"):
+                action = (f"ask the operator whether they want this: dmd authority confirm {owner} (the host asks them to approve "
+                          f"it), or undo it: dmd authority withdraw {owner}")
             elif owner.startswith("U-"):
                 action = f"verify what actually happened before any retry, then dmd uncertain resolve --id {owner} --proof '<evidence>'"
             elif owner.startswith("R-"):
@@ -726,11 +735,15 @@ class Assessment:
             parts.append(f"{len(deferred)} finding(s) deferred under operator authority")
         if open_blockers:
             parts.append(f"{len(open_blockers)} blocker(s) open")
+        waiting = [e["id"] for e in unconfirmed(t)]
+        if waiting:
+            parts.append(f"{len(waiting)} operator decision(s) await confirmation")
         if review_owed:
             parts.append("final review owed")
         return {"headline": "; ".join(parts) or "all obligations satisfied", "checks": groups, "work_unverified": unverified,
                 "findings_open": open_findings, "findings_deferred": deferred, "blockers_open": open_blockers,
                 "review": "owed" if review_owed else "current",
+                "authority_unconfirmed": waiting, "authority_unverified": [e["id"] for e in undisclosed(t)],
                 "rerun": ("dmd run " + " ".join(rerun)) if rerun else None}
 
     def progress(self):
@@ -755,12 +768,20 @@ def unresolved_findings(task_dir, t, fp):
 def gate(task_dir, t, fp=None, require_review=True):
     return evaluate(task_dir, t, fp, require_review)[0]
 
+def effective_state(t):
+    """The stored state, except that a pause or cancellation still awaiting the operator's
+    confirmation does not suspend enforcement: the state it replaced stays in force."""
+    held = [e for e in unconfirmed(t) if e["op"] == "state"]
+    return (held[0].get("prior") or {}).get("state", t["state"]) if held else t["state"]
+
 def evaluate(task_dir, t, fp=None, require_review=True):
     """The gate verdict and the Assessment behind it (None when the task could not be
     assessed: invalid, suspended, or a candidate tree is missing)."""
     errors = validation_errors(t)
     if errors:
         return {"status": "INVALID", "reasons": errors, "next": []}, None
+    if t["state"] != effective_state(t):
+        t = dict(t, state=effective_state(t))
     if t["state"] in SUSPENDED:
         return {"status": t["state"], "reasons": ["execution suspended; obligations are not complete"], "next": [],
                 "summary": {"headline": f"task is {t['state']}" + (f": {t.get('state_reason')}" if t.get("state_reason") else ""),

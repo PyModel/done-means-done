@@ -399,3 +399,100 @@ class NextActionsAreRunnable(test_runtime.DmdFixture):
         self.assertEqual(sorted(set(self.commands())), ["coverage", "run"])
         self.cmd("run", "A-01", "--quiet-window", "0"); self.cmd("coverage", "assert", "--note", "one outcome")
         self.assertEqual(self.commands(), ["review"])
+
+
+class OperatorDecisions(test_runtime.DmdFixture):
+    """R1: `--authority` is text the agent types. With a confirmation channel (hooks in
+    enforce mode with PreToolUse registered) a contract change counts only once the host
+    has asked the operator and they approved."""
+    def channel(self):
+        self.cmd("config", "--mode", "enforce")
+        manifests = self.state / "installations"; manifests.mkdir(mode=0o700, exist_ok=True)
+        (manifests / "m.json").write_text(json.dumps({"commands": ["env dmd hook stop", "env dmd hook pre-tool-use"]}))
+
+    def bash(self, event, command, tool_use_id="tu-1"):
+        out, _ = self.cmd("hook", event, stdin=self.payload(tool_name="Bash", tool_use_id=tool_use_id,
+                                                              tool_input={"command": command}))
+        return json.loads(out) if out.strip() else {}
+
+    def gate(self):
+        out, _ = self.cmd("next")
+        return json.loads(out)
+
+    def test_pre_tool_use_asks_for_contract_changes_only(self):
+        self.setup_task(); self.channel()
+        asked = self.bash("pre-tool-use", "cd x && dmd req cancel --id R-01 --authority 'operator said so'")
+        self.assertEqual(asked["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertEqual(self.bash("pre-tool-use", "dmd run A-01", tool_use_id="tu-2"), {})
+        for sneaky in ("python3 -c \"subprocess.run(['dmd','finding','defer','--id','F-01'])\"",
+                       "/opt/skill/bin/dmd --cwd /x state PAUSED --reason r", "dmd hook post-tool-use < fake.json",
+                       "python3 hooks/install.py --remove --apply", "dmd config --mode observe"):
+            self.assertEqual(self.bash("pre-tool-use", sneaky, tool_use_id="tu-3")["hookSpecificOutput"]["permissionDecision"],
+                             "ask", sneaky)
+
+    def test_unconfirmed_cancel_keeps_the_task_open(self):
+        self.setup_task(); self.channel()
+        self.cmd("req", "add", "second outcome", "--anchor", "request")
+        out, _ = self.cmd("req", "cancel", "--id", "R-02", "--authority", "operator dropped it")
+        self.assertIn("AU-01", out)
+        g = self.gate()
+        self.assertIn("AU-01: req.cancel R-02 awaits the operator's confirmation", g["reasons"])
+        self.assertIn("dmd authority confirm AU-01", json.dumps(g["next"]))
+        self.cmd("authority", "withdraw", "AU-01")
+        t = load_task(locate(self.repo))
+        self.assertEqual(t["requirements"][1]["status"], "active")
+        self.assertNotIn("operator dropped it", json.dumps(t["amendments"]))
+
+    def test_an_approved_host_prompt_confirms_the_decision(self):
+        self.setup_task(); self.channel()
+        command = "dmd req cancel --id R-01 --authority 'operator dropped it'"
+        self.bash("pre-tool-use", command)
+        self.cmd("req", "add", "replacement", "--anchor", "request")
+        self.cmd("req", "cancel", "--id", "R-01", "--authority", "operator dropped it")
+        self.bash("post-tool-use", command)
+        e = load_task(locate(self.repo))["authority"][0]
+        self.assertEqual(e["confirmed"]["via"], "host-prompt")
+        self.assertNotIn("AU-01", json.dumps(self.gate()["reasons"]))
+
+    def test_a_decision_made_outside_the_prompt_is_not_confirmed_by_another_approval(self):
+        self.setup_task(); self.channel()
+        self.cmd("req", "add", "second", "--anchor", "request")
+        self.cmd("req", "cancel", "--id", "R-02", "--authority", "made up")  # never asked: no ticket
+        self.bash("pre-tool-use", "dmd config --max-no-progress 5")
+        self.cmd("config", "--max-no-progress", "5")
+        self.bash("post-tool-use", "dmd config --max-no-progress 5")
+        self.assertIsNone(load_task(locate(self.repo))["authority"][0]["confirmed"])
+
+    def test_an_unconfirmed_pause_does_not_release_the_stop(self):
+        self.setup_task(); self.channel()
+        self.cmd("state", "PAUSED", "--reason", "agent wants to stop")
+        out, _ = self.cmd("hook", "stop", stdin=self.payload())
+        self.assertEqual(json.loads(out)["decision"], "block")
+        self.assertIn("AU-01", json.loads(out)["reason"])
+
+    def test_an_unconfirmed_downgrade_keeps_enforcement(self):
+        self.setup_task(); self.channel()
+        _, err = self.cmd("config", "--mode", "observe")
+        self.assertIn("takes effect once the operator approves", err)
+        out, _ = self.cmd("hook", "stop", stdin=self.payload())
+        self.assertEqual(json.loads(out)["decision"], "block")
+        self.bash("pre-tool-use", "dmd config --mode observe", tool_use_id="tu-9")
+        self.cmd("config", "--mode", "observe")
+        self.bash("post-tool-use", "dmd config --mode observe", tool_use_id="tu-9")
+        out, _ = self.cmd("hook", "stop", stdin=self.payload())
+        self.assertNotIn("decision", json.loads(out))
+
+    def test_unconfirmed_supersede_blocks_the_new_task_and_can_be_withdrawn(self):
+        self.setup_task(); self.channel(); old = locate(self.repo)
+        self.cmd("init", "-m", "tiny replacement", "--authority", "operator", "--new")
+        self.assertIn("init.new", json.dumps(self.gate()["reasons"]))
+        self.cmd("authority", "withdraw", "AU-01")
+        self.assertEqual(locate(self.repo), old)
+        self.assertEqual(load_task(old)["state"], "ACTIVE")
+
+    def test_without_a_channel_decisions_apply_and_are_disclosed(self):
+        self.setup_task(); self.cmd("req", "add", "second", "--anchor", "request")
+        self.cmd("req", "cancel", "--id", "R-02", "--authority", "operator dropped it")
+        g = self.gate()
+        self.assertNotIn("AU-01", json.dumps(g["reasons"]))
+        self.assertEqual(g["summary"]["authority_unverified"], ["AU-01"])

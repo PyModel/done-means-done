@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import contextlib
+import copy
 import io
 import json
 import os
@@ -20,8 +21,9 @@ from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, accept
                     source_for, task_fingerprint, task_snapshot, work_ok)
 from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
 from .store import (StateInsideProject, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
-                    index_run, pid_alive, prune_sessions, remember_session, unindex_run, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
+                    DEFAULT_CONFIG, authority_channel, index_run, pid_alive, prune_sessions, remember_session, unindex_run, withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
+from .authority import effective, find, record, terminal_confirms, withdraw as authority_withdraw
 
 QUIET_WINDOW_SECONDS = 3.0
 # Longest a run will wait for a fresh write to settle before refusing outright.
@@ -106,12 +108,14 @@ def req(args):
             print(rid)
         elif args.action == "attest-only":
             r = get(t["requirements"], args.id)
+            prior = {"record": copy.deepcopy(r), "amendment_at": now()}
             r["attest_only"] = True
             r["attest_only_authority"] = require_text(
                 args.authority, "explicit operator instruction accepting attested-only acceptance")
-            t["amendments"].append({"at": now(), "text": "attested-only acceptance authorized: " + r["attest_only_authority"],
+            t["amendments"].append({"at": prior["amendment_at"], "text": "attested-only acceptance authorized: " + r["attest_only_authority"],
                                     "requirement": r["id"]})
             print(r["id"] + " may be accepted on attestation alone under recorded operator authority")
+            operator_decision(t, "req.attest-only", r["id"], r["attest_only_authority"], prior)
         else:
             r = get(t["requirements"], args.id)
             mine = {w["id"] for w in t["work"] if w["req"] == r["id"]}
@@ -120,9 +124,12 @@ def req(args):
             if stranded:
                 raise DmdError(f"{', '.join(stranded)} depend on work under {r['id']}; replan them first "
                                f"(dmd work set --id W-XX --clear-deps, then --dep as needed)")
+            prior = {"record": copy.deepcopy(r), "amendment_at": now()}
             r["status"] = "removed"
             r["authority"] = require_text(args.authority, "explicit operator removal instruction")
-            t["amendments"].append({"at": now(), "text": r["authority"], "requirement": r["id"]})
+            t["amendments"].append({"at": prior["amendment_at"], "text": r["authority"], "requirement": r["id"]})
+            print(r["id"] + " cancelled under recorded operator authority")
+            operator_decision(t, "req.cancel", r["id"], r["authority"], prior)
 
 
 def declared_input(cwd, item):
@@ -664,12 +671,14 @@ def finding(args):
             f = get(t["findings"], args.id)
             if f["status"] in ("fixed-verified", "disproved", "duplicate"):
                 raise DmdError(f"{f['id']} is already resolved as {f['status']}")
+            prior = {"record": copy.deepcopy(f), "amendment_at": now()}
             f["status"] = "deferred"
             f["note"] = require_text(args.note, "--note explaining why this defect is deferred rather than fixed")
             f["authority"] = require_text(args.authority, "explicit operator instruction deferring this finding (--authority)")
             f["deferred_at"] = now()
-            t["amendments"].append({"at": now(), "text": "finding deferred under operator authority: " + f["authority"], "finding": f["id"]})
+            t["amendments"].append({"at": prior["amendment_at"], "text": "finding deferred under operator authority: " + f["authority"], "finding": f["id"]})
             print(f["id"] + " deferred under recorded operator authority; it is disclosed in every report")
+            operator_decision(t, "finding.defer", f["id"], f["authority"], prior)
         else:
             f = get(t["findings"], args.id)
             if args.status in OPERATOR_FINDING_STATES:
@@ -813,10 +822,13 @@ def review(args):
             # One fingerprint per review. The signature binds the review to this source
             # state; a later gate detects any edit, so a second hash here adds only a race.
             artifact = artifact_from_file(directory, args.evidence)
+            prior = {"review": copy.deepcopy(t.get("review"))}
             t["review"] = {"signature": review_signature(t, fp), "kind": args.kind, "reviewer": require_text(args.reviewer, "--reviewer identity"),
                            "note": require_text(args.note, "final review --note"), "artifact": artifact, "at": now()}
             t.setdefault("review_log", []).append({"at": now(), "outcome": "accepted", "kind": args.kind,
                                                    "reviewer": t["review"]["reviewer"], "note": t["review"]["note"]})
+            if args.kind == "independent":
+                operator_decision(t, "review.independent", "review", t["review"]["reviewer"] + ": " + t["review"]["note"], prior)
     if rejected:
         raise DmdError("review recorded as rejected; obligations remain: " + "; ".join(rejected))
     print("final review recorded")
@@ -833,7 +845,8 @@ def inspect_task(args):
         t = load_task(directory)
         g = gate(directory, t)
         if args.command == "gate":
-            if g["status"] in ("ACTIVE", "BLOCKED", "COMPLETE"):
+            if g["status"] in ("ACTIVE", "BLOCKED", "COMPLETE") and t["state"] not in ("PAUSED", "CANCELLED"):
+                # A stored pause awaiting the operator's confirmation stays recorded as asked.
                 t["state"] = g["status"]
             save(directory, t, "gate", result=g["status"], reason_ids=[x.split(":")[0] for x in g["reasons"]])
         text = render(directory, t, g)
@@ -866,8 +879,11 @@ def other(args):
             require_text(args.reason, "--reason recording the operator instruction or real interruption")
             if args.status == "ACTIVE" and t["state"] == "CANCELLED" and not args.authority:
                 raise DmdError("reactivation after cancellation requires explicit --authority")
+            prior = {"state": t["state"], "state_reason": t.get("state_reason")}
             t["state"] = args.status
             t["state_reason"] = args.reason
+            if prior["state"] != args.status:
+                operator_decision(t, "state", args.status, args.authority or args.reason, prior)
             if args.status == "ACTIVE":
                 t["watchdogs"] = {}
         elif args.command == "attempt":
@@ -917,6 +933,44 @@ def other(args):
                 unindex_run(r.get("token"))
                 t.setdefault("recovery", []).append({"at": now(), "proof": args.proof, "found": found})
                 print(json.dumps(found, indent=2))
+
+
+def operator_decision(t, op, target, text, prior):
+    """Log a contract change the operator must own (authority.py)."""
+    entry = record(t, op, target, text, prior, authority_channel())
+    if entry["channel"] and not entry["confirmed"]:
+        print(f"{entry['id']}: takes effect once the operator approves it; the host asks them before this command runs. "
+              f"If they did not, undo it: dmd authority withdraw {entry['id']}")
+    return entry
+
+
+def authority_command(args):
+    if args.action == "list":
+        t = load_task(need(args))
+        for e in t.get("authority") or []:
+            state = ("withdrawn" if e.get("withdrawn") else f"confirmed via {e['confirmed']['via']}" if e.get("confirmed")
+                     else "AWAITING CONFIRMATION" if e.get("channel") else "unconfirmed (no channel)")
+            print(f"{e['id']} [{state}] {e['op']} {e['target']}: {e['text']}")
+        return 0
+    with edit(args, "authority." + args.action) as (directory, t):
+        entry = find(t, require_text(args.id, "decision ID (AU-XX)"))
+        if args.action == "withdraw":
+            if entry["op"] == "init.new":
+                withdraw_supersede(directory, t, entry)
+            else:
+                authority_withdraw(t, entry)
+            print(f"{entry['id']} withdrawn; what it changed is restored")
+            return
+        if entry.get("confirmed") or entry.get("withdrawn"):
+            raise DmdError(f"{entry['id']} is already {'confirmed' if entry.get('confirmed') else 'withdrawn'}")
+        if not entry.get("channel"):
+            raise DmdError(f"{entry['id']} was recorded without a confirmation channel; it is disclosed as unconfirmed")
+        entry["confirm_requested_at"] = now()
+        if terminal_confirms(f"{entry['op']} {entry['target']}: {entry['text']!r}"):
+            entry["confirmed"] = {"via": "terminal", "at": now()}
+            print(f"{entry['id']} confirmed")
+        else:
+            print(f"{entry['id']}: confirmation requested; it is recorded when the operator approves this command")
 
 
 def doctor(args):
@@ -1057,16 +1111,30 @@ def relocate(args):
 
 
 def configuration(args):
+    """Change hook enforcement. With a confirmation channel the change waits for the
+    operator: hooks keep the settings it replaces until the host prompt is approved."""
+    notice = None
     with lock(state_root()):
         data = load_config(strict=False)
+        has_channel = authority_channel()
+        before = {k: effective(data).get(k, DEFAULT_CONFIG[k]) for k in DEFAULT_CONFIG}
+        data.pop("pending", None)
+        data.update(before)
         if args.mode:
             data["mode"] = args.mode
         if args.max_no_progress is not None:
             if not 1 <= args.max_no_progress <= 6:
                 raise DmdError("max-no-progress must be 1..6; do not bypass host loop safeguards")
             data["max_no_progress"] = args.max_no_progress
+        after = {k: data[k] for k in DEFAULT_CONFIG}
+        if has_channel and after != before and not terminal_confirms(f"change hook settings {before} -> {after}"):
+            data["pending"] = {"prior": before, "at": now()}
+            notice = ("the change takes effect once the operator approves it (the host asks them); "
+                      "until then the hooks keep " + json.dumps(before))
         save_config(data)
     print(json.dumps(data))
+    if notice:
+        print("dmd: " + notice, file=sys.stderr)
 
 
 HELP = {
@@ -1095,6 +1163,7 @@ HELP = {
     "map-host-task": "Map a native host todo ID to a work item",
     "recover-run": "Clear an interrupted run after checking the runner",
     "config": "Set the hook mode (off, observe, enforce) and watchdog limit",
+    "authority": "List operator decisions; ask the operator to confirm one, or withdraw it",
     "hook": "Entry point for installed host lifecycle hooks",
     "list": "List every task record in the state directory (--json, --state)",
     "doctor": "Health check: state root, hook mode, bindings, this worktree's task",
@@ -1103,7 +1172,7 @@ HELP = {
     "migrate": "Import a schema-1 record into a new schema-2 task",
 }
 
-HOOK_EVENTS = ("session-start", "stop", "task-completed", "post-tool-use", "post-tool-failure")
+HOOK_EVENTS = ("session-start", "stop", "task-completed", "pre-tool-use", "post-tool-use", "post-tool-failure")
 
 def parser():
     p = argparse.ArgumentParser(prog="dmd", description="Persistent obligations, strict remediation, verified completion")
@@ -1138,6 +1207,7 @@ def parser():
     s = command("bind-session", other); s.add_argument("session")
     s = command("map-host-task", other); s.add_argument("--host-id", required=True); s.add_argument("--work", required=True)
     s = command("recover-run", other); s.add_argument("--proof", required=True)
+    s = command("authority", authority_command); s.add_argument("action", choices=["list", "confirm", "withdraw"]); s.add_argument("id", nargs="?")
     s = command("config", configuration); s.add_argument("--mode", choices=["off", "observe", "enforce"]); s.add_argument("--max-no-progress", type=int)
     s = command("hook", None); s.add_argument("event", choices=HOOK_EVENTS)
     s = command("list", None); s.add_argument("--json", action="store_true"); s.add_argument("--state", action="append")

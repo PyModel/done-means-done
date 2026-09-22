@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dmdlib.storage import DmdError, atomic, digest, lock, private_dir, read_json
 
 # Event names this installer registers; also used to recognize its own orphaned registrations.
-EVENTS = {"session-start", "stop", "task-completed", "post-tool-use", "post-tool-failure"}
+EVENTS = {"session-start", "stop", "task-completed", "pre-tool-use", "post-tool-use", "post-tool-failure"}
 
 
 def validate(data):
@@ -88,6 +88,8 @@ def main(argv=None):
         ("SessionStart", None, command + " session-start", 30),
         ("Stop", None, command + " stop", 30),
         ("TaskCompleted", None, command + " task-completed", 30),
+        # Asks the operator before a command changes their contract (dmdlib/authority.py).
+        ("PreToolUse", "Bash", command + " pre-tool-use", 10),
         ("PostToolUse", "Edit|Write|Bash", command + " post-tool-use", 10),
         ("PostToolUseFailure", "Bash", command + " post-tool-failure", 10),
     ]

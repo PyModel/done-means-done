@@ -1,13 +1,15 @@
 """Claude Code lifecycle adapters; hooks never execute verification commands."""
 from __future__ import annotations
+import copy
 import json
 import sys
 from pathlib import Path
-from .storage import DmdError, append_line, atomic, digest, lock, now, read_json, safe_text, save
-from .model import check_candidate, evaluate, live, task_fingerprint
+from .storage import DmdError, append_line, atomic, digest, lock, now, private_dir, read_json, safe_text, save
+from .model import check_candidate, effective_state, evaluate, live, task_fingerprint
+from . import authority
 from .source import identity
 from .store import (StateInsideProject, bind_session, binding_path, load_config, load_task, locate, remember_session,
-                    state_root)
+                    save_config, state_root, task_records, transaction)
 from .report import render
 
 
@@ -90,6 +92,55 @@ def quick_activity(root, binding, cwd, payload, event):
     return True
 
 
+def approval_key(payload, session):
+    command = str((payload.get("tool_input") or {}).get("command") or "")
+    return digest(str(payload.get("tool_use_id") or "") or session + "\0" + command)
+
+
+def ask_operator(root, payload, session, mode):
+    """PreToolUse: a Bash command that changes the operator's contract is put to the
+    operator. The host's permission prompt is the one step the agent cannot answer for
+    itself, and it still appears when permission prompts are otherwise bypassed."""
+    if mode != "enforce" or payload.get("tool_name") != "Bash":
+        return 0
+    ops = authority.detect((payload.get("tool_input") or {}).get("command"))
+    if not ops:
+        return 0
+    pending = private_dir(root / "pending")
+    atomic(pending / (approval_key(payload, session) + ".json"),
+           json.dumps({"ops": ops, "at": now(), "session": digest(session)}))
+    what = "; ".join(authority.DESCRIPTIONS[op] for op in ops)
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                      "permissionDecisionReason": f"Done Means Done: this command would {what}. That is the operator's "
+                      "decision: approve only if you asked for it."}}))
+    return 0
+
+
+def record_approval(root, payload, session):
+    """PostToolUse after an asked command: the operator approved it, so the decisions it
+    recorded (and any config change it made) are confirmed. A decision recorded by a
+    command that was never asked stays unconfirmed, and the gate says so."""
+    ticket = root / "pending" / (approval_key(payload, session) + ".json")
+    if not ticket.exists():
+        return
+    try:
+        pending = read_json(ticket)
+        if pending.get("session") != digest(session):
+            return
+        ops, since = pending.get("ops") or [], pending.get("at") or ""
+        if "config" in ops:
+            data = load_config(strict=False)
+            if isinstance(data.get("pending"), dict) and (data["pending"].get("at") or "") >= since:
+                data.pop("pending")
+                save_config(data)
+        for directory, t in task_records():
+            if isinstance(t, dict) and authority.confirm(copy.deepcopy(t), ops, since, "host-prompt"):
+                with transaction(directory, "authority.confirmed", allow_cancelled=True) as task:
+                    authority.confirm(task, ops, since, "host-prompt")
+    finally:
+        ticket.unlink(missing_ok=True)
+
+
 def handle(args):
     """Hooks fail open. The only nonzero exit is TaskCompleted enforcement; every internal
     error becomes a systemMessage naming the cause and exit 0, because a hook that exits 2
@@ -108,7 +159,7 @@ def handle(args):
 
 def _handle(args):
     root = state_root()
-    config = load_config()
+    config = authority.effective(load_config())
     mode = config.get("mode", "observe")
     if mode == "off":
         return 0
@@ -127,11 +178,15 @@ def _handle(args):
     if not isinstance(session, str) or not session or len(session) > 512 or not isinstance(cwd, str):
         print(json.dumps({"systemMessage": "Done Means Done: no valid session/worktree identity; no task was selected."}))
         return 0
+    if args.event == "pre-tool-use":
+        return ask_operator(root, payload, session, mode)
     directory = None
     notice = None
     binding = binding_path(session)
-    if args.event in ("post-tool-use", "post-tool-failure") and quick_activity(root, binding, cwd, payload, args.event):
-        return 0
+    if args.event in ("post-tool-use", "post-tool-failure"):
+        record_approval(root, payload, session)
+        if quick_activity(root, binding, cwd, payload, args.event):
+            return 0
     if binding.exists():
         d = Path(read_json(binding)["task_dir"])
         if not d.is_absolute() or not d.resolve().is_relative_to((root / "v2").resolve()):
@@ -183,7 +238,7 @@ def _handle(args):
             # Finished is final for the hooks. A later session in this worktree is not the
             # assignment; a contract change (amend, new requirement) reopens it explicitly.
             return 0
-        suspended = task["state"] in ("PAUSED", "CANCELLED")
+        suspended = effective_state(task) in ("PAUSED", "CANCELLED")
         # A suspended task is never fingerprinted by a hook: its declared inputs may be
         # gone (a deleted session scratchpad), and the gate answers without them.
         fp = None if suspended else task_fingerprint(task)

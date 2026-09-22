@@ -3,7 +3,7 @@ from __future__ import annotations
 from .model import acceptance_reason, attested, check_candidate, legacy_receipt, repeated_attempts
 
 
-SECTIONS = ("assignment", "acceptance", "requirements", "work", "checks", "findings", "blockers", "attempts", "reviews", "owed", "next", "footer")
+SECTIONS = ("assignment", "acceptance", "requirements", "work", "checks", "findings", "blockers", "decisions", "attempts", "reviews", "owed", "next", "footer")
 
 def sections(directory, t, g):
     """The report as named sections, so a reader can ask for one instead of the dump."""
@@ -73,6 +73,14 @@ def sections(directory, t, g):
     for u in t["uncertain"]:
         lines.append(f"- {u['id']} [{'resolved' if u['resolved'] else 'UNKNOWN'}] {u['text']}")
     out["blockers"] = lines
+    out["decisions"] = []
+    if t.get("authority"):
+        out["decisions"] = ["## Operator decisions"]
+        for e in t["authority"]:
+            state = ("withdrawn" if e.get("withdrawn") else f"confirmed via {e['confirmed']['via']}" if e.get("confirmed")
+                     else "AWAITING THE OPERATOR'S CONFIRMATION" if e.get("channel")
+                     else "NOT CONFIRMED: no confirmation channel was installed")
+            out["decisions"].append(f"- {e['id']} [{state}] {e['op']} {e['target']}: {e['text']}")
     repeats = {item: history for item, history in (t.get("attempts") or {}).items() if repeated_attempts(history)}
     out["attempts"] = []
     if repeats:

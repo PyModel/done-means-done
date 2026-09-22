@@ -11,6 +11,7 @@ from . import __version__
 from .storage import DmdError, atomic, digest, ident, lock, now, private_dir, read_json, redact, save
 from .source import git_root, identity
 from .model import SCHEMA, contract_digest, extract_clauses, validation_errors
+from . import authority
 
 
 def state_root():
@@ -215,6 +216,23 @@ def load_config(strict=True):
             raise DmdError("; ".join(errors))
     return data
 
+def installed_events():
+    """Hook events registered by an installer run against this state root."""
+    events = set()
+    directory = state_root() / "installations"
+    for manifest in sorted(directory.glob("*.json")) if directory.is_dir() else []:
+        with contextlib.suppress(DmdError, OSError, AttributeError):
+            events |= {c.rsplit(" ", 1)[-1] for c in read_json(manifest).get("commands") or [] if isinstance(c, str)}
+    return events
+
+def authority_channel():
+    """Whether the host can ask the operator to confirm a contract change (authority.py)."""
+    try:
+        config = load_config(strict=False)
+    except DmdError:
+        return False
+    return not config_errors(config) and authority.channel(config, installed_events())
+
 def save_config(data):
     errors = config_errors(data)
     if errors:
@@ -260,6 +278,9 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
                     prior = load_task(old)
                     if prior.get("running"):
                         raise DmdError("cannot supersede an assignment while its check is running")
+                    authority.record(t, "init.new", prior["task_id"], authorization,
+                                     {"dir": str(old), "state": prior["state"], "state_reason": prior.get("state_reason")},
+                                     authority_channel())
                     prior["state"] = "PAUSED"
                     save(old, prior, "superseded-active-pointer", new_task_id=task_id)
         private_dir(directory)
@@ -270,6 +291,23 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
     if session:
         bind_session(directory, session)
     return directory, t
+
+
+def withdraw_supersede(directory, t, entry):
+    """Undo an unconfirmed `init --new`: the superseded task resumes as it was, the worktree
+    and its sessions point back at it, and the replacement is cancelled."""
+    prior = entry["prior"]
+    old = Path(prior["dir"])
+    with lock(old):
+        previous = load_task(old)
+        previous["state"] = prior["state"]
+        previous["state_reason"] = prior.get("state_reason")
+        save(old, previous, "supersede-withdrawn", by_task_id=t["task_id"])
+    atomic(directory.parent / "active.json", json.dumps({"task_id": previous["task_id"]}))
+    rebind_sessions(directory, old)
+    t["state"] = "CANCELLED"
+    t["state_reason"] = f"withdrew {entry['id']}: {previous['task_id']} resumed"
+    authority.withdraw(t, entry)
 
 
 # Verification runs on this machine ---------------------------------------------------
