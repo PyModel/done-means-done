@@ -26,7 +26,8 @@ positional arguments:
     reconcile      Re-derive the handoff on resume and print it
     state          Set the task ACTIVE, PAUSED, or CANCELLED with a reason
     amend          Record an operator amendment to the request
-    attempt        Record a failed attempt signature for a work item
+    attempt        Record a failed attempt signature for a requirement, work
+                   item, check or finding
     bind-session   Bind a host session ID to this task
     map-host-task  Map a native host todo ID to a work item
     recover-run    Clear an interrupted run after checking the runner
@@ -47,4 +48,3 @@ options:
   --version        show program's version number and exit
   --cwd CWD
   --task TASK
-0.6.0

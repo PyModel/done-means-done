@@ -1053,7 +1053,11 @@ def other(args):
             if args.status == "ACTIVE":
                 t["watchdogs"] = {}
         elif args.command == "attempt":
-            get(t["work"], args.item)
+            groups = {"R": "requirements", "W": "work", "A": "checks", "F": "findings"}
+            prefix = args.item.split("-", 1)[0]
+            if prefix not in groups:
+                raise DmdError("attempt names a requirement, work item, check or finding ID (R-/W-/A-/F-)")
+            get(t[groups[prefix]], args.item)
             history = t["attempts"].setdefault(args.item, [])
             signature = digest(require_text(args.signature, "observed failure signature").strip())
             history.append({"at": now(), "signature": signature, "failure": redact(args.signature), "strategy": args.strategy})
@@ -1293,7 +1297,7 @@ HELP = {
     "reconcile": "Re-derive the handoff on resume and print it",
     "state": "Set the task ACTIVE, PAUSED, or CANCELLED with a reason",
     "amend": "Record an operator amendment to the request",
-    "attempt": "Record a failed attempt signature for a work item",
+    "attempt": "Record a failed attempt signature for a requirement, work item, check or finding",
     "bind-session": "Bind a host session ID to this task",
     "map-host-task": "Map a native host todo ID to a work item",
     "recover-run": "Clear an interrupted run after checking the runner",

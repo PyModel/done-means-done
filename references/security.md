@@ -8,7 +8,7 @@ Acceptance commands execute through the local shell with the account's existing 
 
 Approvals bind the declared check plus selected runtime identity and declared file inputs. They do not recursively identify every file or remote service an arbitrary program can read. Include relevant verifier/configuration dependencies as `--input` and inspect changes before reapproval. Environmental invariants that matter should be asserted by the check itself. Host tool permissions remain in effect; the skill grants no broad tool allowlist.
 
-Commands have bounded output and duration. Local process-group supervision cleans up descendants when the runner returns. A program can intentionally escape a process group or create remote jobs; no general containment claim is made. Run suspicious code in an independently managed sandbox, not under broad host privileges.
+Commands have bounded output and duration. Local process-group supervision cleans up descendants when the runner returns, when it receives SIGTERM/SIGHUP, and when it is killed outright (the supervisor terminates its own group once its parent's pipe closes). A program can intentionally escape a process group or create remote jobs; no general containment claim is made. Run suspicious code in an independently managed sandbox, not under broad host privileges.
 
 ## Private state and evidence
 

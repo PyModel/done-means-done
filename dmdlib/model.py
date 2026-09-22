@@ -563,8 +563,6 @@ class Assessment:
                     action = "implement/verify" + (f" (checks owed: {', '.join(owed)})" if owed else " (map an acceptance check)")
                 else:
                     action = "rerun stale evidence: " + (", ".join(owed) or "no mapped check")
-                if repeated_attempts(attempts.get(owner, [])):
-                    action += "; equivalent attempts already failed here — change diagnostic strategy before retrying"
             elif owner.startswith("A-"):
                 c = get(t["checks"], owner)
                 if self.verdicts[owner][0] is not None and any(w in actionable_owners for w in c["work"]):
@@ -572,6 +570,8 @@ class Assessment:
                 action = "; ".join(text.split(": ", 1)[1] for o, text in self.reasons if o == owner)
             else:
                 continue
+            if repeated_attempts(attempts.get(owner, [])):
+                action += "; equivalent attempts already failed here — change diagnostic strategy before retrying"
             result.append({"id": owner, "action": action})
         return result
 

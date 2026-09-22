@@ -15,7 +15,7 @@ Paths are resolved on the current machine. Symlinked state and settings *directo
 | `init --request-file FILE --authority TEXT [--session ID] [--independent-review]` | Preserve the sanitized request and activation; reject replacing an unfinished task by default |
 | `init -m TEXT --authority TEXT --new` | Explicitly start another assignment; preserve the previous unfinished task as paused, never overwrite it |
 | `req add TEXT --anchor TEXT` | Add one independent outcome/constraint linked to the source request |
-| `req cancel --id R-01 --authority TEXT` | Record actual operator removal; invalidate contract coverage |
+| `req cancel --id R-01 --authority TEXT` | Record actual operator removal; invalidate contract coverage. Refused while active work elsewhere depends on its work (`work set --clear-deps` first) |
 | `req attest-only --id R-01 --authority TEXT` | Record operator authority to accept this outcome on attestation alone; named in the report |
 | `work remove --id W-02 --note TEXT` | Supersede an agent-authored work item; refused while a dependency or finding still maps to it |
 | `check remove --id A-02 --note TEXT` | Supersede an agent-authored check; refused if its requirement would be left with none |
@@ -36,7 +36,7 @@ dmd work set --id W-02 --status verified
 dmd work set --id W-02 --replace "Improved implementation approach" --note "Evidence supporting the revised approach"
 ```
 
-Every work item requires a requirement. Every check requires an explicit work mapping. Starting/closing dependent work requires current prerequisite evidence. `--dep`, `--owns`, and `--work` are repeatable. `--owns` is planning metadata, not an enforced write lease. Replacing the approach preserves its history and invalidates coverage.
+Work items are optional decomposition. Every work item requires a requirement; a check maps to a requirement and to zero or more of its work items (`--work` is repeatable). A work item is satisfied when it has at least one mapped check and every mapped check is accepted; its `--status` is a progress note, and `--status verified` is refused without that evidence. Planned work never disappears silently: it needs its own evidence or `work remove --note`. Starting/closing dependent work requires current prerequisite evidence. `--dep` and `--owns` are repeatable; `--clear-deps` empties the dependency list. `--owns` is planning metadata, not an enforced write lease. Replacing the approach preserves its history and invalidates coverage.
 
 ```bash
 dmd check add --req R-01 --work W-01 --work W-02 \
@@ -46,6 +46,7 @@ dmd check add --req R-01 --work W-01 --work W-02 \
   --candidate /absolute/project --exclusive integration-db
 dmd preview A-01
 dmd approve A-01 --note "Inspected command and transitive scripts within authorized permissions"
+dmd check add ... --approve "Inspected command and verifier"   # author and approve in one call
 dmd run A-01
 dmd run A-01 A-03 A-04          # one fingerprint window for the list
 dmd run --all                   # every live, approved command check, in ledger order
@@ -66,6 +67,8 @@ A check whose command passed (expected exit, literal match, within bounds) while
 Only `--method command` produces machine-verified acceptance. `--method manual|review|browser` requires `--attested-because TEXT` saying why no command can observe the behavior; those checks are reported as `SELF-ATTESTED`, counted in `gate` output, and cannot alone accept a requirement without `req attest-only`.
 
 `--match` is a literal string, not a regex. It is necessary but not sufficient semantic proof. The called verifier must assert the correct behavior and intended test discovery before printing it. An arbitrary zero exit is insufficient.
+
+`--approve NOTE` on `check add` or `check edit` records the same inspected approval as `dmd approve` for the definition as written. Any later edit clears it, so edited command text never runs uninspected.
 
 `check edit --id A-01 ...` changes explicitly supplied fields, archives the old definition/evidence, and clears current green, baseline, and pending-import status. Reapprove after any definition/input/runtime approval change; an expired approval names whether the definition, a declared input, or the execution environment drifted. `--no-regression` clears a mis-flagged regression declaration and is recorded in the check history. An edit must leave the entire check valid. `--input` is repeatable and names real files relative to the check working directory or absolute paths; declared missing inputs are errors.
 
@@ -119,7 +122,7 @@ dmd finding defer --id F-04 --authority "Operator: vendor bug, tracked upstream 
   --note "Fix belongs to the dependency; workaround is not authorized"
 ```
 
-Origins: `introduced`, `pre-existing`, `dependency`, `unknown`. They do not exempt remediation. `defer` is the only operator-authorized exit for a defect that will not be fixed in this assignment: `--status deferred` is refused, the authority is recorded as an amendment (so `coverage assert` is owed again), and the finding is listed as deferred in the report and the gate `summary.findings_deferred`. Fixed findings require current mapped work/checks and a regression baseline or documented limitation. Disproof is source-bound. Duplicate chains must resolve without cycles or missing IDs. Updating a note does not reset an existing status or origin.
+Origins: `introduced`, `pre-existing`, `dependency`, `unknown`. They do not exempt remediation. `defer` is the only operator-authorized exit for a defect that will not be fixed in this assignment: `--status deferred` is refused, the authority is recorded as an amendment (so `coverage assert` is owed again), and the finding is listed as deferred in the report and the gate `summary.findings_deferred`. Fixed findings require current mapped checks (work is optional) and a regression baseline or documented limitation. Disproof is source-bound. A finding that was ever `confirmed` is disproved only with `--check` naming an accepted executed check that demonstrates the invariant holds; a suspected one needs the note and evidence artifact. Duplicate chains must resolve without cycles or missing IDs. Updating a note does not reset an existing status or origin.
 
 ```bash
 dmd blocker add "The integration account rejects the required permission" --item W-02 \
@@ -143,9 +146,9 @@ dmd status --json   # task_dir, task, gate
 dmd --help          # every subcommand with a one-line description; dmd COMMAND --help for flags
 ```
 
-`reasons` is one line per unmet obligation and every line names its cause: `A-01: not run`, `A-02: FAIL: exit or match failed; fix and rerun`, `A-03: stale: /path/worktree changed since the receipt (tested @ <head>); rerun`, `A-04: STALE: passed while its candidate or definition moved; rerun`, `A-05: definition edited; inspect, approve and rerun`, `A-06: receipt predates 0.5.0 candidate binding and the task root has since changed; rerun to bind it to /path`, `W-01: verified, but evidence is not current for A-03`, `review: …`.
+`reasons` is one line per unmet obligation and every line names its cause: `A-01: not run`, `A-02: FAIL: exit or match failed; fix and rerun`, `A-03: stale: /path/worktree changed since the receipt (tested @ <head>); rerun`, `A-04: STALE: passed while its candidate or definition moved; rerun`, `A-05: definition edited; inspect, approve and rerun`, `A-06: receipt predates 0.5.0 candidate binding and the task root has since changed; rerun to bind it to /path`, `W-01: checks owed: A-03`, `review: …`.
 
-`summary` groups them: `headline` (one line), `checks` as `accepted` / `legacy` / `stale` / `failed` / `not_run` / `unapproved` / `other` ID lists, `work_unverified`, `findings_open`, `blockers_open`, `review` (`current` or `owed`), and `rerun`, the `dmd run A-01 A-03 …` that discharges the stale, failed and unrun checks (`null` when none). `legacy` lists checks accepted on a pre-0.5.0 receipt bound to the task root; their next run rebinds them.
+`summary` groups them: `headline` (one line), `checks` as `accepted` / `legacy` / `stale` / `failed` / `not_run` / `edited` / `missing_inputs` / `other` ID lists (0.7.0 renamed `unapproved` to `edited`: it holds checks whose definition changed since approval or receipt), `work_unverified`, `findings_open`, `blockers_open`, `review` (`current` or `owed`), and `rerun`, the `dmd run A-01 A-03 …` that discharges the stale, failed and unrun checks (`null` when none). `legacy` lists checks accepted on a pre-0.5.0 receipt bound to the task root; their next run rebinds them.
 
 ## Review, reporting and recovery
 
@@ -162,7 +165,7 @@ dmd handoff
 
 Use `self` unless a genuinely separate reviewer performed the review. All other acceptance conditions must be ready before the final review can be recorded. The review binds to the contract, the source map, and the identity of each piece of evidence (candidate, definition, outcome, observation), not to receipt timestamps or log paths: a rerun that reproduces the same pass on a byte-identical candidate keeps the review current; a moved tree, an edited contract or a changed outcome reopens it. Reports distinguish this attestation; the runtime does not authenticate reviewer identity.
 
-`gate` emits JSON and exits 0 only for COMPLETE, 1 for a valid unfinished/suspended assignment, and 2 for input/infrastructure errors. `run` exits 0 when every listed check is an accepted green or intentional red, 1 when any failed or went stale, and 2 for setup/approval/preflight/exclusive-resource errors. `next` emits JSON; `status --json` exposes state plus computed gate; `report --save` and `handoff` write generated views outside the project. `list` labels stored state, which may need current revalidation, and reports an unreadable record as its own row instead of failing the listing. Exit 3 means a defect in dmd itself, not a usage error: the task record was not advanced and the trace should be reported. A lock held by another `dmd` process is waited out with backoff for `DMD_LOCK_WAIT` seconds (default 5) before exit 2 names the wait; `no active task in this worktree` lists unfinished tasks of sibling worktrees when any exist.
+`next` lists every item you can act on now, dependency-ready first; the final review appears only when nothing else is owed. `BLOCKED` means every open reason waits on an unresolved blocker, directly, through its requirement, or through a prerequisite. When reasons remain but no item is dependency-ready, `next` holds one `plan` action naming them. `gate` emits JSON and exits 0 only for COMPLETE, 1 for a valid unfinished/suspended assignment, and 2 for input/infrastructure errors. `run` exits 0 when every listed check is an accepted green or intentional red, 1 when any failed or went stale, and 2 for setup/approval/preflight/exclusive-resource errors. `next` emits JSON; `status --json` exposes state plus computed gate; `report --save` and `handoff` write generated views outside the project. `list` labels stored state, which may need current revalidation, and reports an unreadable record as its own row instead of failing the listing. Exit 3 means a defect in dmd itself, not a usage error: the task record was not advanced and the trace should be reported. A lock held by another `dmd` process is waited out with backoff for `DMD_LOCK_WAIT` seconds (default 5) before exit 2 names the wait; `no active task in this worktree` lists unfinished tasks of sibling worktrees when any exist.
 
 ```bash
 dmd state PAUSED --reason "Operator requested a pause"
@@ -170,10 +173,10 @@ dmd state ACTIVE --reason "Operator resumed after checkpoint review"
 dmd state CANCELLED --reason "Operator cancelled the assignment"
 dmd state ACTIVE --reason "Operator explicitly restarted the cancelled assignment" --authority "Actual instruction"
 dmd recover-run --proof "Local process is gone and external outcome was reconciled"
-dmd attempt W-02 "Concrete failure signature" --strategy "Different experiment and expected information"
+dmd attempt W-02 "Concrete failure signature" --strategy "Different experiment and expected information"   # any R/W/A/F ID
 ```
 
-The runner lock prevents clearing a live local check. `recover-run` also checks the recorded runner PID: it refuses while that process is alive on this host, and otherwise prints the check, start time, PID, host, liveness, the interrupted flag, and the reason the proof was accepted; the record predating PID tracking or belonging to another host is named as not checkable. Recovery proof must additionally reconcile any external effect. Arbitrary source writers and remote effects are not controlled by that lock.
+`dmd run` treats SIGTERM and SIGHUP like Ctrl-C: the check's process group gets SIGTERM, a grace period, then SIGKILL, and the run is recorded as interrupted. If the runner itself is killed outright, the check's supervisor sees its parent vanish and terminates the group, so a check never keeps executing unsupervised. The runner lock prevents clearing a live local check. `recover-run` also checks the recorded runner PID: it refuses while that process is alive on this host, and otherwise prints the check, start time, PID, host, liveness, the interrupted flag, and the reason the proof was accepted; the record predating PID tracking or belonging to another host is named as not checkable. Recovery proof must additionally reconcile any external effect. Arbitrary source writers and remote effects are not controlled by that lock.
 
 ## Session hooks and migration
 

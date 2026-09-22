@@ -72,6 +72,26 @@ test_candidate_moved_is_reported_as_stale_with_drift (test_candidates.StaleCase.
 test_drift_lists_added_removed_and_modified (test_candidates.StaleCase.test_drift_lists_added_removed_and_modified) ... ok
 test_head_move_during_run_names_both_commits (test_candidates.StaleCase.test_head_move_during_run_names_both_commits) ... ok
 test_red_run_against_a_moving_candidate_is_red_stale (test_candidates.StaleCase.test_red_run_against_a_moving_candidate_is_red_stale) ... ok
+test_everything_waiting_on_the_blocker_is_blocked (test_completion.BlockedMeansNothingActionable.test_everything_waiting_on_the_blocker_is_blocked) ... ok
+test_failing_fixed_verified_finding_is_actionable (test_completion.BlockedMeansNothingActionable.test_failing_fixed_verified_finding_is_actionable) ... ok
+test_missing_red_baseline_on_an_unblocked_requirement_is_actionable (test_completion.BlockedMeansNothingActionable.test_missing_red_baseline_on_an_unblocked_requirement_is_actionable) ... ok
+test_stale_coverage_on_an_unblocked_task_is_actionable (test_completion.BlockedMeansNothingActionable.test_stale_coverage_on_an_unblocked_task_is_actionable) ... ok
+test_work_depending_on_blocked_work_waits_too (test_completion.BlockedMeansNothingActionable.test_work_depending_on_blocked_work_waits_too) ... ok
+test_author_and_approve_in_one_call (test_completion.LessCeremonySameGuarantees.test_author_and_approve_in_one_call) ... ok
+test_edit_after_one_call_approval_still_needs_inspection (test_completion.LessCeremonySameGuarantees.test_edit_after_one_call_approval_still_needs_inspection) ... ok
+test_a_stuck_plan_is_an_action_not_a_dead_end (test_completion.NoCheapExits.test_a_stuck_plan_is_an_action_not_a_dead_end) ... ok
+test_cancelling_a_requirement_cannot_strand_dependent_work (test_completion.NoCheapExits.test_cancelling_a_requirement_cannot_strand_dependent_work) ... ok
+test_confirmed_finding_needs_an_executed_check_to_be_disproved (test_completion.NoCheapExits.test_confirmed_finding_needs_an_executed_check_to_be_disproved) ... ok
+test_suspected_finding_is_disproved_by_evidence (test_completion.NoCheapExits.test_suspected_finding_is_disproved_by_evidence) ... ok
+test_sigkill_of_the_runner_still_stops_the_check (test_completion.RunnerSurvivesItsParent.test_sigkill_of_the_runner_still_stops_the_check) ... ok
+test_sigterm_terminates_the_check_and_records_the_interruption (test_completion.RunnerSurvivesItsParent.test_sigterm_terminates_the_check_and_records_the_interruption) ... ok
+test_a_live_run_is_not_a_no_progress_loop (test_completion.StopGovernance.test_a_live_run_is_not_a_no_progress_loop) ... ok
+test_accepted_evidence_is_progress (test_completion.StopGovernance.test_accepted_evidence_is_progress) ... ok
+test_adding_records_is_not_progress (test_completion.StopGovernance.test_adding_records_is_not_progress) ... ok
+test_cd_into_a_subdirectory_keeps_the_task_governing (test_completion.StopGovernance.test_cd_into_a_subdirectory_keeps_the_task_governing) ... ok
+test_unrelated_project_releases_the_binding (test_completion.StopGovernance.test_unrelated_project_releases_the_binding) ... ok
+test_task_completed_on_a_paused_task_does_not_reject_verified_work (test_completion.SuspendedTaskHooks.test_task_completed_on_a_paused_task_does_not_reject_verified_work) ... ok
+test_a_file_that_never_settles_is_drift_not_a_crash (test_completion.VolatileSource.test_a_file_that_never_settles_is_drift_not_a_crash) ... ok
 test_definition_change_is_named_distinctly (test_fixes.ApprovalDiagnosticsCase.test_definition_change_is_named_distinctly) ... ok
 test_environment_drift_is_named_and_re_approvable (test_fixes.ApprovalDiagnosticsCase.test_environment_drift_is_named_and_re_approvable) ... ok
 test_input_change_is_named_distinctly (test_fixes.ApprovalDiagnosticsCase.test_input_change_is_named_distinctly) ... ok
@@ -145,7 +165,7 @@ test_malformed_payloads_never_exit_nonzero (test_hardening.IsolationCase.test_ma
 test_renamed_checkout_does_not_block_stop (test_hardening.IsolationCase.test_renamed_checkout_does_not_block_stop) ... ok
 test_session_moving_to_another_project_is_released_and_governs_the_new_one (test_hardening.IsolationCase.test_session_moving_to_another_project_is_released_and_governs_the_new_one) ... ok
 test_sessions_are_stored_hashed_and_bounded (test_hardening.IsolationCase.test_sessions_are_stored_hashed_and_bounded) ... ok
-test_watchdog_pause_names_the_session (test_hardening.IsolationCase.test_watchdog_pause_names_the_session) ... ok
+test_watchdog_release_names_the_session (test_hardening.IsolationCase.test_watchdog_release_names_the_session) ... ok
 test_missing_cwd_is_a_clean_spawn_failure (test_hardening.RunnerEdgeCase.test_missing_cwd_is_a_clean_spawn_failure) ... ok
 test_non_utf8_output_near_the_limit_is_not_a_failure (test_hardening.RunnerEdgeCase.test_non_utf8_output_near_the_limit_is_not_a_failure) ... ok
 test_output_exactly_at_the_limit_is_not_a_failure (test_hardening.RunnerEdgeCase.test_output_exactly_at_the_limit_is_not_a_failure) ... ok
@@ -171,7 +191,6 @@ test_duplicate_cycle_blocks (test_model.ModelCase.test_duplicate_cycle_blocks) .
 test_duplicate_missing_target_invalid (test_model.ModelCase.test_duplicate_missing_target_invalid) ... ok
 test_duplicate_requirement_ids_invalid (test_model.ModelCase.test_duplicate_requirement_ids_invalid) ... ok
 test_edited_evidence_not_accepted (test_model.ModelCase.test_edited_evidence_not_accepted) ... ok
-test_explicit_check_to_work_mapping_required (test_model.ModelCase.test_explicit_check_to_work_mapping_required) ... ok
 test_final_review_invalidated_by_changed_outcome (test_model.ModelCase.test_final_review_invalidated_by_changed_outcome) ... ok
 test_final_review_invalidated_by_changed_source (test_model.ModelCase.test_final_review_invalidated_by_changed_source) ... ok
 test_final_review_required (test_model.ModelCase.test_final_review_required) ... ok
@@ -196,10 +215,12 @@ test_operator_authority_allows_an_attested_only_requirement (test_model.ModelCas
 test_ordinary_prose_cannot_be_command_evidence (test_model.ModelCase.test_ordinary_prose_cannot_be_command_evidence) ... ok
 test_orphan_work_is_invalid (test_model.ModelCase.test_orphan_work_is_invalid) ... ok
 test_paused_never_completes (test_model.ModelCase.test_paused_never_completes) ... ok
+test_planned_work_without_a_mapped_check_blocks (test_model.ModelCase.test_planned_work_without_a_mapped_check_blocks) ... ok
 test_preexisting_confirmed_finding_blocks (test_model.ModelCase.test_preexisting_confirmed_finding_blocks) ... ok
 test_red_nonintentional_exit_is_invalid (test_model.ModelCase.test_red_nonintentional_exit_is_invalid) ... ok
 test_regression_requires_meaningful_baseline (test_model.ModelCase.test_regression_requires_meaningful_baseline) ... ok
 test_required_skip_is_invalid (test_model.ModelCase.test_required_skip_is_invalid) ... ok
+test_requirement_level_check_without_work_items_completes (test_model.ModelCase.test_requirement_level_check_without_work_items_completes) ... ok
 test_requirement_removal_needs_authority (test_model.ModelCase.test_requirement_removal_needs_authority) ... ok
 test_sole_attested_check_cannot_accept_a_requirement (test_model.ModelCase.test_sole_attested_check_cannot_accept_a_requirement) ... ok
 test_stored_complete_revalidated (test_model.ModelCase.test_stored_complete_revalidated) ... ok
@@ -211,7 +232,8 @@ test_timeout_not_accepted (test_model.ModelCase.test_timeout_not_accepted) ... o
 test_unconfigured_migrated_check_not_accepted (test_model.ModelCase.test_unconfigured_migrated_check_not_accepted) ... ok
 test_unknown_external_outcome_blocks (test_model.ModelCase.test_unknown_external_outcome_blocks) ... ok
 test_unmatched_output_not_accepted (test_model.ModelCase.test_unmatched_output_not_accepted) ... ok
-test_unverified_work_blocks (test_model.ModelCase.test_unverified_work_blocks) ... ok
+test_work_status_is_a_progress_note_not_proof (test_model.ModelCase.test_work_status_is_a_progress_note_not_proof) ... ok
+test_work_without_current_evidence_blocks (test_model.ModelCase.test_work_without_current_evidence_blocks) ... ok
 test_post_tool_use_is_recorded_when_the_lock_is_free (test_resilience.HookContentionCase.test_post_tool_use_is_recorded_when_the_lock_is_free) ... ok
 test_post_tool_use_is_silent_when_the_task_lock_is_held (test_resilience.HookContentionCase.test_post_tool_use_is_silent_when_the_task_lock_is_held) ... ok
 test_cli_mutation_waits_out_a_concurrent_holder (test_resilience.LockRetryCase.test_cli_mutation_waits_out_a_concurrent_holder) ... ok
@@ -238,19 +260,21 @@ test_atomic_state_and_event_projection_agree (test_runtime.RuntimeCase.test_atom
 test_cancel_prevents_execution_and_reactivation_needs_authority (test_runtime.RuntimeCase.test_cancel_prevents_execution_and_reactivation_needs_authority) ... ok
 test_check_expectation_mismatch_fails_even_exit_zero (test_runtime.RuntimeCase.test_check_expectation_mismatch_fails_even_exit_zero) ... ok
 test_command_pass_cannot_be_manually_set (test_runtime.RuntimeCase.test_command_pass_cannot_be_manually_set) ... ok
+test_complete_is_final_for_hooks_but_the_gate_stays_honest (test_runtime.RuntimeCase.test_complete_is_final_for_hooks_but_the_gate_stays_honest) ... ok
 test_content_edit_preserved_mtime_is_detected (test_runtime.RuntimeCase.test_content_edit_preserved_mtime_is_detected) ... ok
 test_evidence_private_permissions (test_runtime.RuntimeCase.test_evidence_private_permissions) ... ok
-test_explicit_resume_resets_no_progress_watchdogs (test_runtime.RuntimeCase.test_explicit_resume_resets_no_progress_watchdogs) ... ok
 test_finding_fixed_without_evidence_refused (test_runtime.RuntimeCase.test_finding_fixed_without_evidence_refused) ... ok
 test_finding_update_does_not_reset_status_or_origin (test_runtime.RuntimeCase.test_finding_update_does_not_reset_status_or_origin) ... ok
 test_git_ignored_external_input_explicitly_hashed (test_runtime.RuntimeCase.test_git_ignored_external_input_explicitly_hashed) ... ok
 test_git_untracked_filename_with_newline_is_hashed (test_runtime.RuntimeCase.test_git_untracked_filename_with_newline_is_hashed) ... ok
 test_hook_does_not_persist_raw_payload (test_runtime.RuntimeCase.test_hook_does_not_persist_raw_payload) ... ok
+test_init_new_moves_the_session_to_the_new_assignment (test_runtime.RuntimeCase.test_init_new_moves_the_session_to_the_new_assignment) ... ok
 test_initialization_collision_cannot_overwrite (test_runtime.RuntimeCase.test_initialization_collision_cannot_overwrite) ... ok
 test_invalid_session_rejected_before_task_activation (test_runtime.RuntimeCase.test_invalid_session_rejected_before_task_activation) ... ok
 test_manual_evidence_requires_existing_file (test_runtime.RuntimeCase.test_manual_evidence_requires_existing_file) ... ok
 test_metadata_only_touch_does_not_stale_content (test_runtime.RuntimeCase.test_metadata_only_touch_does_not_stale_content) ... ok
 test_missing_declared_input_is_drift_not_a_crash (test_runtime.RuntimeCase.test_missing_declared_input_is_drift_not_a_crash) ... ok
+test_new_obligation_reopens_a_complete_task (test_runtime.RuntimeCase.test_new_obligation_reopens_a_complete_task) ... ok
 test_new_task_preserves_old_as_paused (test_runtime.RuntimeCase.test_new_task_preserves_old_as_paused) ... ok
 test_observe_mode_does_not_block_or_pause (test_runtime.RuntimeCase.test_observe_mode_does_not_block_or_pause) ... ok
 test_off_mode_has_no_hook_effect (test_runtime.RuntimeCase.test_off_mode_has_no_hook_effect) ... ok
@@ -258,16 +282,15 @@ test_oversized_state_never_replaces_readable_record (test_runtime.RuntimeCase.te
 test_preview_status_do_not_execute (test_runtime.RuntimeCase.test_preview_status_do_not_execute) ... ok
 test_real_red_then_green_and_finding_resolution (test_runtime.RuntimeCase.test_real_red_then_green_and_finding_resolution) ... ok
 test_red_against_green_rejected (test_runtime.RuntimeCase.test_red_against_green_rejected) ... ok
+test_release_note_clears_after_verified_progress (test_runtime.RuntimeCase.test_release_note_clears_after_verified_progress) ... ok
 test_required_skip_refused (test_runtime.RuntimeCase.test_required_skip_refused) ... ok
 test_second_lock_cannot_enter (test_runtime.RuntimeCase.test_second_lock_cannot_enter) ... ok
 test_secret_redaction (test_runtime.RuntimeCase.test_secret_redaction) ... ok
-test_session_binding_does_not_follow_another_active_task (test_runtime.RuntimeCase.test_session_binding_does_not_follow_another_active_task) ... ok
 test_session_id_cannot_traverse_state_paths (test_runtime.RuntimeCase.test_session_id_cannot_traverse_state_paths) ... ok
 test_source_mutated_by_check_is_rejected (test_runtime.RuntimeCase.test_source_mutated_by_check_is_rejected) ... ok
 test_source_permission_change_detected (test_runtime.RuntimeCase.test_source_permission_change_detected) ... ok
 test_state_cannot_live_inside_verified_project (test_runtime.RuntimeCase.test_state_cannot_live_inside_verified_project) ... ok
 test_stop_hook_continues_on_stop_hook_active (test_runtime.RuntimeCase.test_stop_hook_continues_on_stop_hook_active) ... ok
-test_stop_revalidates_stored_complete_after_source_change (test_runtime.RuntimeCase.test_stop_revalidates_stored_complete_after_source_change) ... ok
 test_symlink_input_target_is_not_silently_followed (test_runtime.RuntimeCase.test_symlink_input_target_is_not_silently_followed) ... ok
 test_syntax_failure_does_not_count_as_regression (test_runtime.RuntimeCase.test_syntax_failure_does_not_count_as_regression) ... ok
 test_task_completed_accepts_verified_local_work_before_root_review (test_runtime.RuntimeCase.test_task_completed_accepts_verified_local_work_before_root_review) ... ok
@@ -276,11 +299,11 @@ test_task_path_traversal_rejected (test_runtime.RuntimeCase.test_task_path_trave
 test_unapproved_check_never_executes (test_runtime.RuntimeCase.test_unapproved_check_never_executes) ... ok
 test_uncertain_operation_has_explicit_resolution (test_runtime.RuntimeCase.test_uncertain_operation_has_explicit_resolution) ... ok
 test_unowned_work_refused (test_runtime.RuntimeCase.test_unowned_work_refused) ... ok
-test_watchdog_pauses_without_claiming_completion (test_runtime.RuntimeCase.test_watchdog_pauses_without_claiming_completion) ... ok
+test_watchdog_releases_the_stop_but_never_the_obligations (test_runtime.RuntimeCase.test_watchdog_releases_the_stop_but_never_the_obligations) ... ok
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 279 tests in 56.869s
+Ran 302 tests in 88.189s
 
 OK
-DMD_TESTS_PASS:279;skipped=0
+DMD_TESTS_PASS:302;skipped=0

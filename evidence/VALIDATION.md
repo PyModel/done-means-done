@@ -1,6 +1,6 @@
 # Validation report
 
-Release: **Done Means Done 0.6.0**, prepared September 13, 2026 (this header names the current release; the sections below are cumulative). The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
+Release: **Done Means Done 0.7.0**, prepared September 22, 2026 (this header names the current release; the sections below are cumulative). The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
 
 ## Executed verification
 
@@ -91,3 +91,20 @@ Trigger: a Stop hook in an unrelated project failed on every stop with `dmd: dec
 | `tests/test_candidates.py`: a fresh write settles within the default window and the run proceeds (edit-then-verify no longer refuses) while a still-dirty tree under a long window is refused; `tests/test_resilience.py`: the moved-cwd case now asserts exit 0 plus the release message | All pass; full suite `DMD_TESTS_PASS:279`, [transcript](tests-final.log) |
 
 Run on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7).
+
+## 0.7.0 completion-contract verification
+
+Trigger: an architecture review and a correctness/gaming review of 0.6.0. Every behavioral change below has a test that failed on 0.6.0 code and passes now (`tests/test_completion.py`); the red runs were taken against the 0.6.0 modules before each fix.
+
+| Check | Result |
+|---|---|
+| BlockedMeansNothingActionable: stale coverage, a missing red baseline and a failing fixed-verified finding on an unblocked requirement are `ACTIVE` with an action (0.6.0: `BLOCKED`, `next: []`); everything waiting on a blocker, directly or through a dependency, is `BLOCKED` | All pass |
+| SuspendedTaskHooks: TaskCompleted on a paused task exits 0 (0.6.0: exit 2, "no current accepted evidence") | Pass |
+| StopGovernance: a subdirectory keeps governing, an unrelated project releases; a new finding is not progress, an accepted run is; a live run is not counted as a loop | All pass |
+| RunnerSurvivesItsParent: SIGTERM to `dmd run` exits 130, terminates the check and records the interruption (0.6.0: exit -15, check kept running); SIGKILL of the runner still stops the check within the grace period (0.6.0: orphaned) | All pass |
+| LessCeremonySameGuarantees / NoCheapExits / VolatileSource: one-call author-and-approve completes a task with no work items; an edit still forces reinspection; a confirmed finding needs an accepted executed check to be disproved; `req cancel` refuses to strand work; a stuck plan yields an action; a never-settling file is `volatile` drift with other files hashed as before | All pass |
+| Fingerprint compatibility: `source.fingerprint` of two unchanged trees computed by the 0.6.0 and 0.7.0 modules | Identical digests |
+| Full suite | `DMD_TESTS_PASS:302;skipped=0`, [transcript](tests-final.log) |
+
+Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7). Live Claude Code host integration was not re-tested for this release.
+
