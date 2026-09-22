@@ -19,7 +19,8 @@ positional arguments:
     blocker        Record, clear, or list concrete external blockers
     uncertain      Record or reconcile an external operation with unknown
                    outcome
-    coverage       Show the contract or assert request-to-inventory coverage
+    coverage       Show the contract; list, map or mark request items; assert
+                   coverage
     review         Record the final request/diff/integration review
     status         Print the report (--json for task and gate)
     next           Gate JSON with the next executable actions
@@ -34,6 +35,8 @@ positional arguments:
     bind-session   Bind a host session ID to this task
     map-host-task  Map a native host todo ID to a work item
     recover-run    Clear an interrupted run after checking the runner
+    authority      List operator decisions; ask the operator to confirm one,
+                   or withdraw it
     config         Set the hook mode (off, observe, enforce) and watchdog
                    limit
     hook           Entry point for installed host lifecycle hooks
@@ -51,4 +54,455 @@ options:
   --version        show program's version number and exit
   --cwd CWD
   --task TASK
-CLI_HELP_PASS: 31 subcommands accept --help
+$ dmd amend --help
+usage: dmd amend [-h] text
+
+Record an operator amendment to the request
+
+positional arguments:
+  text
+
+options:
+  -h, --help  show this help message and exit
+$ dmd approve --help
+usage: dmd approve [-h] --note NOTE id
+
+Approve a check's command after inspecting its preview
+
+positional arguments:
+  id
+
+options:
+  -h, --help   show this help message and exit
+  --note NOTE
+$ dmd attempt --help
+usage: dmd attempt [-h] [--strategy STRATEGY] item signature
+
+Record a failed attempt signature for a requirement, work item, check or
+finding
+
+positional arguments:
+  item
+  signature
+
+options:
+  -h, --help           show this help message and exit
+  --strategy STRATEGY
+$ dmd authority --help
+usage: dmd authority [-h] {list,confirm,withdraw} [id]
+
+List operator decisions; ask the operator to confirm one, or withdraw it
+
+positional arguments:
+  {list,confirm,withdraw}
+  id
+
+options:
+  -h, --help            show this help message and exit
+$ dmd bind-session --help
+usage: dmd bind-session [-h] session
+
+Bind a host session ID to this task
+
+positional arguments:
+  session
+
+options:
+  -h, --help  show this help message and exit
+$ dmd blocker --help
+usage: dmd blocker [-h] [--json] [--id ID] [--item ITEM] [--owner OWNER]
+                   [--unblock UNBLOCK] [--proof PROOF]
+                   {add,clear,list} [text]
+
+Record, clear, or list concrete external blockers
+
+positional arguments:
+  {add,clear,list}
+  text
+
+options:
+  -h, --help         show this help message and exit
+  --json
+  --id ID
+  --item ITEM
+  --owner OWNER
+  --unblock UNBLOCK
+  --proof PROOF
+$ dmd check --help
+usage: dmd check [-h] [--req REQ] [--id ID] [--cmd CMD] [--run-cwd RUN_CWD]
+                 [--expect EXPECT] [--match MATCH] [--red-match RED_MATCH]
+                 [--status STATUS] [--note NOTE] [--evidence EVIDENCE]
+                 [--candidate CANDIDATE] [--approve APPROVE]
+                 [--method {command,manual,review,browser}] [--work WORK]
+                 [--input INPUT] [--clear-inputs] [--clear-exclusive]
+                 [--exclusive EXCLUSIVE] [--writes WRITES] [--clear-writes]
+                 [--timeout TIMEOUT] [--max-output MAX_OUTPUT] [--regression]
+                 [--no-regression] [--red-exit RED_EXIT]
+                 [--attested-because ATTESTED_BECAUSE] [--json]
+                 {add,edit,set,baseline,remove,list}
+
+Add, edit, list, or attest acceptance checks; record a red baseline
+
+positional arguments:
+  {add,edit,set,baseline,remove,list}
+
+options:
+  -h, --help            show this help message and exit
+  --req REQ
+  --id ID
+  --cmd CMD
+  --run-cwd RUN_CWD
+  --expect EXPECT
+  --match MATCH
+  --red-match RED_MATCH
+  --status STATUS
+  --note NOTE
+  --evidence EVIDENCE
+  --candidate CANDIDATE
+  --approve APPROVE
+  --method {command,manual,review,browser}
+  --work WORK
+  --input INPUT
+  --clear-inputs
+  --clear-exclusive
+  --exclusive EXCLUSIVE
+  --writes WRITES
+  --clear-writes
+  --timeout TIMEOUT
+  --max-output MAX_OUTPUT
+  --regression
+  --no-regression
+  --red-exit RED_EXIT
+  --attested-because ATTESTED_BECAUSE
+  --json
+$ dmd config --help
+usage: dmd config [-h] [--mode {off,observe,enforce}]
+                  [--max-no-progress MAX_NO_PROGRESS]
+
+Set the hook mode (off, observe, enforce) and watchdog limit
+
+options:
+  -h, --help            show this help message and exit
+  --mode {off,observe,enforce}
+  --max-no-progress MAX_NO_PROGRESS
+$ dmd coverage --help
+usage: dmd coverage [-h] [--req REQ] [--note NOTE]
+                    {show,assert,items,map,context} [item ...]
+
+Show the contract; list, map or mark request items; assert coverage
+
+positional arguments:
+  {show,assert,items,map,context}
+  item
+
+options:
+  -h, --help            show this help message and exit
+  --req REQ
+  --note NOTE
+$ dmd doctor --help
+usage: dmd doctor [-h]
+
+Health check: state root, hook mode, bindings, this worktree's task
+
+options:
+  -h, --help  show this help message and exit
+$ dmd finding --help
+usage: dmd finding [-h] [--authority AUTHORITY] [--id ID]
+                   [--location LOCATION]
+                   [--status {confirmed,deferred,disproved,duplicate,fixed-unverified,fixed-verified,suspected}]
+                   [--origin {introduced,pre-existing,dependency,unknown}]
+                   [--note NOTE] [--work WORK] [--check CHECK]
+                   [--duplicate DUPLICATE] [--evidence EVIDENCE]
+                   [--input INPUT] [--json]
+                   {add,set,defer,list} [text]
+
+Record, update, or list defects found in the project
+
+positional arguments:
+  {add,set,defer,list}
+  text
+
+options:
+  -h, --help            show this help message and exit
+  --authority AUTHORITY
+  --id ID
+  --location LOCATION
+  --status {confirmed,deferred,disproved,duplicate,fixed-unverified,fixed-verified,suspected}
+  --origin {introduced,pre-existing,dependency,unknown}
+  --note NOTE
+  --work WORK
+  --check CHECK
+  --duplicate DUPLICATE
+  --evidence EVIDENCE
+  --input INPUT
+  --json
+$ dmd gate --help
+usage: dmd gate [-h] [--json] [--save]
+                [--only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}]
+                [--brief]
+
+Compute and store the gate; exit 0 only on COMPLETE
+
+options:
+  -h, --help            show this help message and exit
+  --json
+  --save
+  --only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}
+                        render one report section
+  --brief               omit the per-candidate source map from gate JSON
+$ dmd gc --help
+usage: dmd gc [-h]
+
+Remove dead session bindings; list finished task records
+
+options:
+  -h, --help  show this help message and exit
+$ dmd handoff --help
+usage: dmd handoff [-h] [--json] [--save]
+                   [--only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}]
+                   [--brief]
+
+Write handoff.md for the next session
+
+options:
+  -h, --help            show this help message and exit
+  --json
+  --save
+  --only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}
+                        render one report section
+  --brief               omit the per-candidate source map from gate JSON
+$ dmd hook --help
+usage: dmd hook [-h]
+                {session-start,stop,task-completed,pre-tool-use,post-tool-use,post-tool-failure}
+
+Entry point for installed host lifecycle hooks
+
+positional arguments:
+  {session-start,stop,task-completed,pre-tool-use,post-tool-use,post-tool-failure}
+
+options:
+  -h, --help            show this help message and exit
+$ dmd init --help
+usage: dmd init [-h] [-m MESSAGE] [--request-file REQUEST_FILE]
+                --authority AUTHORITY [--session SESSION] [--new]
+                [--independent-review]
+
+Create the durable task record for an authorized assignment
+
+options:
+  -h, --help            show this help message and exit
+  -m, --message MESSAGE
+  --request-file REQUEST_FILE
+  --authority AUTHORITY
+  --session SESSION
+  --new
+  --independent-review
+$ dmd list --help
+usage: dmd list [-h] [--json] [--state STATE]
+
+List every task record in the state directory (--json, --state)
+
+options:
+  -h, --help     show this help message and exit
+  --json
+  --state STATE
+$ dmd map-host-task --help
+usage: dmd map-host-task [-h] --host-id HOST_ID --work WORK
+
+Map a native host todo ID to a work item
+
+options:
+  -h, --help         show this help message and exit
+  --host-id HOST_ID
+  --work WORK
+$ dmd migrate --help
+usage: dmd migrate [-h] --from-task FROM_TASK --authority AUTHORITY [--new]
+
+Import a schema-1 record into a new schema-2 task
+
+options:
+  -h, --help            show this help message and exit
+  --from-task FROM_TASK
+  --authority AUTHORITY
+  --new
+$ dmd next --help
+usage: dmd next [-h] [--json] [--save]
+                [--only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}]
+                [--brief]
+
+Gate JSON with the next executable actions
+
+options:
+  -h, --help            show this help message and exit
+  --json
+  --save
+  --only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}
+                        render one report section
+  --brief               omit the per-candidate source map from gate JSON
+$ dmd preview --help
+usage: dmd preview [-h] id
+
+Print exactly what a check will execute, for approval
+
+positional arguments:
+  id
+
+options:
+  -h, --help  show this help message and exit
+$ dmd reconcile --help
+usage: dmd reconcile [-h] [--json] [--save]
+                     [--only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}]
+                     [--brief]
+
+Re-derive the handoff on resume and print it
+
+options:
+  -h, --help            show this help message and exit
+  --json
+  --save
+  --only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}
+                        render one report section
+  --brief               omit the per-candidate source map from gate JSON
+$ dmd recover-run --help
+usage: dmd recover-run [-h] --proof PROOF
+
+Clear an interrupted run after checking the runner
+
+options:
+  -h, --help     show this help message and exit
+  --proof PROOF
+$ dmd relocate --help
+usage: dmd relocate [-h] --to TO --authority AUTHORITY
+
+Re-point a task whose checkout moved (all evidence becomes NOT_RUN)
+
+options:
+  -h, --help            show this help message and exit
+  --to TO
+  --authority AUTHORITY
+$ dmd report --help
+usage: dmd report [-h] [--json] [--save]
+                  [--only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}]
+                  [--brief]
+
+Print the full report (--save writes report.md)
+
+options:
+  -h, --help            show this help message and exit
+  --json
+  --save
+  --only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}
+                        render one report section
+  --brief               omit the per-candidate source map from gate JSON
+$ dmd req --help
+usage: dmd req [-h] [--id ID] [--anchor ANCHOR] [--covers C-XX]
+               [--authority AUTHORITY] [--json]
+               {add,cancel,attest-only,list} [text]
+
+Add, cancel, list, or mark attest-only a requirement
+
+positional arguments:
+  {add,cancel,attest-only,list}
+  text
+
+options:
+  -h, --help            show this help message and exit
+  --id ID
+  --anchor ANCHOR
+  --covers C-XX
+  --authority AUTHORITY
+  --json
+$ dmd review --help
+usage: dmd review [-h] --kind {self,independent} --reviewer REVIEWER
+                  --note NOTE --evidence EVIDENCE
+
+Record the final request/diff/integration review
+
+options:
+  -h, --help            show this help message and exit
+  --kind {self,independent}
+  --reviewer REVIEWER
+  --note NOTE
+  --evidence EVIDENCE
+$ dmd run --help
+usage: dmd run [-h] [--all] [--red] [--quiet-window QUIET_WINDOW]
+               [--wait-exclusive WAIT_EXCLUSIVE]
+               [ids ...]
+
+Execute checks (IDs or --all) in one fingerprint window
+
+positional arguments:
+  ids
+
+options:
+  -h, --help            show this help message and exit
+  --all
+  --red
+  --quiet-window QUIET_WINDOW
+  --wait-exclusive WAIT_EXCLUSIVE
+$ dmd state --help
+usage: dmd state [-h] --reason REASON [--authority AUTHORITY]
+                 {ACTIVE,PAUSED,CANCELLED}
+
+Set the task ACTIVE, PAUSED, or CANCELLED with a reason
+
+positional arguments:
+  {ACTIVE,PAUSED,CANCELLED}
+
+options:
+  -h, --help            show this help message and exit
+  --reason REASON
+  --authority AUTHORITY
+$ dmd status --help
+usage: dmd status [-h] [--json] [--save]
+                  [--only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}]
+                  [--brief]
+
+Print the report (--json for task and gate)
+
+options:
+  -h, --help            show this help message and exit
+  --json
+  --save
+  --only {assignment,acceptance,requirements,work,checks,findings,blockers,decisions,attempts,reviews,leftovers,owed,next,footer}
+                        render one report section
+  --brief               omit the per-candidate source map from gate JSON
+$ dmd uncertain --help
+usage: dmd uncertain [-h] [--id ID] [--proof PROOF] [--json]
+                     {add,resolve,list} [text]
+
+Record or reconcile an external operation with unknown outcome
+
+positional arguments:
+  {add,resolve,list}
+  text
+
+options:
+  -h, --help          show this help message and exit
+  --id ID
+  --proof PROOF
+  --json
+$ dmd work --help
+usage: dmd work [-h] [--req REQ] [--id ID] [--dep DEP] [--owns OWNS]
+                [--status {doing,implemented,todo,verified}] [--note NOTE]
+                [--replace REPLACE] [--clear-deps] [--json]
+                {add,set,remove,list} [text]
+
+Add, edit, remove, or list work items and set their status
+
+positional arguments:
+  {add,set,remove,list}
+  text
+
+options:
+  -h, --help            show this help message and exit
+  --req REQ
+  --id ID
+  --dep DEP
+  --owns OWNS
+  --status {doing,implemented,todo,verified}
+  --note NOTE
+  --replace REPLACE
+  --clear-deps
+  --json
+CLI_HELP_PASS: 32 subcommands accept --help

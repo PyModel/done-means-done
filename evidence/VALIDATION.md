@@ -6,14 +6,15 @@ Release: **Done Means Done 0.7.0**, prepared September 22, 2026 (this header nam
 
 | Check | Actual result | Evidence |
 |---|---|---|
-| `python3 -B tests/run.py` | **306 tests passed; 0 failures; 0 skipped** (macOS Python 3.14.7 and 3.10; Linux Python 3.10 under dash). A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
-| `python3 -B examples/local-demo.py` | Actual subprocess CLI workflow: unapproved execution rejected; intentional red baseline; root-cause repair; green verification; finding closure; final review/gate/report; same-size preserved-mtime source mutation rejected; final repair/reverification; a solely attested requirement refused, then completed under recorded operator authority with the acceptance basis disclosed in the report. | [Local demonstration transcript](local-demo.log) |
+| `python3 -B tests/run.py` | **338 tests passed; 0 failures; 0 skipped** (macOS Python 3.14.7 and 3.10; Linux Python 3.10 under dash). A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
+| `python3 -B examples/local-demo.py` | Actual subprocess CLI workflow: unapproved execution rejected; intentional red baseline; root-cause repair; green verification; finding closure; final review/gate/report; same-size preserved-mtime source mutation rejected; final repair/reverification; a solely attested requirement refused, then completed under recorded operator authority with the acceptance basis disclosed in the report; temporary fixtures removed. | [Local demonstration transcript](local-demo.log) |
 | `python3 -B tests/validate_package.py` | Python syntax parsed using the Python 3.10 grammar; required files, release identity, local Markdown links, code fences, skill size, real files/no symlinks and no bytecode-cache artifacts checked. | [Static package transcript](package-validation.log) |
 | YAML frontmatter parsed with PyYAML 6.0.3 (Docker `python:3.10`) | Correct single skill name, standard fields and version. PyYAML is not a runtime dependency. | [Metadata result](frontmatter-validation.log) |
-| `python3 -B bin/dmd --version` and subcommand help | Version 0.7.0; every documented command entrypoint accepts its help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
+| `python3 -B bin/dmd --version` and subcommand help | Version 0.7.0; all 32 subcommands accept their help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
+| Live Claude Code host (2.1.280, model haiku, isolated settings) | 7/7 scenarios pass: SessionStart context reaches the model; enforce-mode Stop blocks and the agent follows `dmd next`; the watchdog releases; observe mode never blocks; an operator decision is denied without a prompt channel, recorded as confirmed once approved through a permission-prompt tool, and still caught in a `python -c` argv-list form. Total cost $0.17. | [Live host transcript](live-host.log) |
 | SHA-256 manifest | Every tracked file's checksum listed and verified with `shasum -a 256 -c SHA256SUMS`; no symlinks or bytecode caches. No archive was built for 0.7.0. | `SHA256SUMS` |
 
-The unit suite includes **synthetic predicate fixtures** and **actual CLI/filesystem/process/hook-contract/installer/migration tests**. Synthetic records test the acceptance predicate, not independent truth of software behavior. Hook payload fixtures test documented control responses, not a live host session.
+The unit suite includes **synthetic predicate fixtures** and **actual CLI/filesystem/process/hook-contract/installer/migration tests**. Synthetic records test the acceptance predicate, not independent truth of software behavior. Hook payload fixtures test documented control responses; the live host run above exercises them in a real session.
 
 All installer tests used isolated temporary settings/state. Pre-fix failure transcripts (`adoption-before-fix.log`, `resume-before-fix.log`) are 0.3.0 artifacts, intentionally retained as regression evidence and explained in [remediations](REMEDIATIONS.md); they are not current failures. The transcripts in the table above were regenerated on macOS for 0.7.0.
 
@@ -29,11 +30,11 @@ Executed on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7), the platform 0.
 
 ## Build environment
 
-0.3.0 was prepared on Linux x86_64, kernel 6.18.35, glibc 2.41, Python 3.13.5. The 0.4.0 defect review and every regenerated transcript above ran on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7). Commands and fixture processes ran locally. The stated Python 3.10 minimum is syntax-checked, not a separate executed Python 3.10 test run. Executed runtimes are now Python 3.13.5 (Linux) and 3.14.7 (macOS). Temporary project and state directories in the demo are removed after it completes; its transcript is retained, not live temporary-path download links.
+0.3.0 was prepared on Linux x86_64, kernel 6.18.35, glibc 2.41, Python 3.13.5. The 0.4.0 defect review and every regenerated transcript above ran on macOS (Darwin 25.6.0, Apple Silicon, Python 3.14.7). Commands and fixture processes ran locally. Since 0.7.0 the suite also runs on Python 3.10, both on macOS and on Linux (Docker `python:3.10`, Debian). Temporary project and state directories in the demo are removed after it completes; its transcript is retained, not live temporary-path download links.
 
 ## Explicitly not verified or implemented
 
-- No live Claude Code session was started; installed host versions, hook reload behavior, tool authorization UX, and session compaction integration were not exercised on the operator's machine.
+- Live Claude Code sessions were run for 0.7.0 only in headless `-p` mode ([transcript](live-host.log)). Interactive approval of an operator decision was exercised through `--permission-prompt-tool`, not a human at the prompt; hook reload and compaction integration were not exercised.
 - No Windows or multi-Python-version runtime matrix was executed; Windows is unsupported in this implementation.
 - The inspected source repository's original acceptance suite was not executed as an upstream checkout. Direct container network cloning was unavailable; source inspection used the GitHub connector.
 - No test proves the model notices/records every possible defect, maps every natural-language request correctly, or cannot modify its own private files. Reviewer identity and authority are recorded attestations, not authenticated principals.
@@ -110,5 +111,26 @@ Trigger: an architecture review and a correctness/gaming review of 0.6.0. Every 
 | A match token inside the command text is refused (`cmd && echo TOKEN`, `print("TOKEN")`); a later session leaves a COMPLETE task's record byte-identical and creates no binding; a sibling worktree without its own task stays governed, one with its own task rebinds to it | All pass |
 | Real state on this machine: all 28 recorded tasks loaded and gated read-only by 0.6.0 and 0.7.0 code | Identical verdict distribution (22 ACTIVE, 4 PAUSED, 1 COMPLETE, 1 with a missing root); no load errors |
 
-Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7). Live Claude Code host integration was not re-tested for this release.
+Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7).
+
+## 0.7.0 open-item verification
+
+Trigger: the remaining items of the same review (operator authority, check outputs, disproof binding, request items, the task store, hook cost, legacy migration), two supervisor crash reports, and a request that the agent leave no clutter behind.
+
+| Check | Result |
+|---|---|
+| OperatorDecisions (11 tests): with PreToolUse installed and mode `enforce`, `req cancel`, `req attest-only`, `finding defer`, `state`, `review --kind independent`, `init --new` and `config` get a host `ask`; an unapproved decision leaves the gate owing `AU-*` and a withdraw restores what it replaced; an approval confirms only the approving session's task; `echo`/`grep` mentions are not asked; without a channel the decision applies and every report says it was never confirmed | All pass |
+| DeclaredOutputsCase: a check writing `reports/junit.xml` passes with `--writes`, an unrelated edit still stales it, and tasks without `--writes` keep byte-identical fingerprints | All pass |
+| Disproof binding: an edit elsewhere keeps a disproof; an edit to its `--location` or inputs reopens it ("disproof is stale") | All pass |
+| RequestItemsAreAccounted: a five-item request with four mapped items refuses coverage and names the unmapped item; a prose request records no items; old tasks keep their contract digest | All pass |
+| StoreBoundary: hooks and migration import no CLI module (AST check) | Pass |
+| NextActionsAreRunnable: every `dmd next` action parses as a complete command | Pass |
+| NoLeftovers: request text and review evidence come from standard input (no scratch file); the report lists untracked files that are not declared outputs; `gc` prunes expired approval tickets; the run index drops a run its task no longer records | All pass |
+| Supervisor crash (SIGABRT in `_enter_buffered_busy`, from the reports): a supervisor whose parent stopped listening holds without aborting, and one orphaned by its parent exits with no `Fatal Python error` (red on the previous code) | All pass |
+| Migration: an unknown legacy check method imports as `manual` needing review; a repeat import of the same file is refused without `--new` | All pass |
+| Hook latency (hyperfine, 40 runs) | PostToolUse 92.7 to 42.0 ms; Stop 119.9 to 77.4 ms |
+| Real state: 28 recorded tasks gated read-only by 0.6.0 and this code | Identical distribution (22 ACTIVE, 4 PAUSED, 1 BLOCKED on a missing root, 1 COMPLETE); 0 contract-digest differences |
+| Full suite, macOS Python 3.14.7 and 3.10; Linux Docker `python:3.10` | `DMD_TESTS_PASS:338;skipped=0` on each, [transcript](tests-final.log) |
+
+Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7).
 
