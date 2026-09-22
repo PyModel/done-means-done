@@ -1,14 +1,26 @@
 """Explicit copy-only import of schema-1 assignments. No historical green is trusted."""
 import re
 from pathlib import Path
+import hashlib
 import json
 from .storage import DmdError, lock, read_json, save, evidence
 from .model import new_id
-from .store import create_task, require_text
+from .store import create_task, require_text, task_records
+
+# Methods a schema-2 check can carry. A legacy method outside this set is imported as a
+# command check that must be reauthored, not a reason to reject the whole import.
+METHODS = ("command", "manual", "review", "browser")
 
 def migrate(args):
     source = Path(args.from_task).expanduser()
     old = read_json(source)
+    source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+    if not args.new:
+        # Importing the same record twice duplicates every obligation in a second task.
+        for _, t in task_records():
+            if isinstance(t, dict) and (t.get("migration") or {}).get("source_sha256") == source_sha256:
+                raise DmdError(f"this record was already imported as {t['task_id']} ({t['root']}); "
+                               "resume that task, or pass --new to import it again deliberately")
     if not isinstance(old, dict) or old.get("schema") != 1:
         raise DmdError("migration accepts schema 1 only; the original file is never modified")
     request = require_text(old.get("original_request"), "legacy original_request")
@@ -22,7 +34,7 @@ def migrate(args):
             raise DmdError(f"legacy {name} has invalid or duplicate IDs")
     require_text(args.authority, "--authority")
     def prepare(t):
-        t["migration"] = {"source": str(source.resolve()), "legacy_id": old.get("task_id")}
+        t["migration"] = {"source": str(source.resolve()), "source_sha256": source_sha256, "legacy_id": old.get("task_id")}
         for r in old["requirements"]:
             t["requirements"].append({"id": r["id"], "text": r["text"], "anchor": "Imported request: reread original and reconcile",
                                       "status": "active", "legacy_status": r.get("status")})
@@ -43,10 +55,13 @@ def migrate(args):
                 wid = new_id(t["work"], "W")
                 t["work"].append({"id": wid, "req": rid, "text": "Revalidate imported acceptance", "status": "todo", "deps": [], "owns": [], "note": ""})
                 ws = [wid]
-            t["checks"].append({"id": c["id"], "req": rid, "work": ws, "method": c.get("method", "command"),
+            method = c.get("method", "command")
+            t["checks"].append({"id": c["id"], "req": rid, "work": ws, "method": method if method in METHODS else "command",
                                "command": c.get("command"), "cwd": str(Path(t["root"]).resolve()), "expect": c.get("expect") or "Reauthor legacy expectation",
                                "match": None, "timeout": 300, "max_output": 1048576, "inputs": [], "regression": False,
                                "red_match": None, "red_exit": 1, "status": "NOT_RUN", "receipt": None, "red": None, "baseline": None, "needs_review": True})
+            if method not in METHODS:
+                t["checks"][-1]["legacy_method"] = str(method)[:80]
         for f in old["findings"]:
             t["findings"].append({"id": f["id"], "text": f["text"], "location": f.get("location") or "legacy record: locate exact artifact",
                                   "status": "confirmed" if f.get("confidence") == "confirmed" else "suspected",

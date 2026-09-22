@@ -119,6 +119,21 @@ class AdoptionCase(unittest.TestCase):
         source=self.old(status='CANCELLED'); self.cli('migrate','--from-task',str(source),'--authority','explicit import'); self.assertEqual(load_task(locate(self.repo))['state'],'CANCELLED')
     def test_migration_refuses_unsupported_schema_without_task(self):
         source=self.old(schema=99); self.cli('migrate','--from-task',str(source),'--authority','explicit import',code=2); self.assertIsNone(locate(self.repo))
+    def test_migration_imports_an_unknown_check_method_for_reauthoring(self):
+        source=self.old(checks=[{'id':'A-01','req':'R-01','method':'pytest-plugin','command':'pytest','expect':'passes','status':'PASS'}])
+        self.cli('migrate','--from-task',str(source),'--authority','explicit import')
+        c=load_task(locate(self.repo))['checks'][0]
+        self.assertEqual((c['method'],c['legacy_method'],c['needs_review'],c['status']),('command','pytest-plugin',True,'NOT_RUN'))
+    def test_migration_refuses_the_same_record_twice_without_new(self):
+        source=self.old(); self.cli('migrate','--from-task',str(source),'--authority','explicit import')
+        first=load_task(locate(self.repo))['task_id']
+        self.cli('state','CANCELLED','--reason','operator stopped it')
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(main(['--cwd',str(self.repo),'migrate','--from-task',str(source),'--authority','explicit import']),2)
+        self.assertIn('already imported as '+first, err.getvalue())
+        self.assertEqual(load_task(locate(self.repo))['task_id'],first)
+        self.cli('migrate','--from-task',str(source),'--authority','explicit import','--new')
+        self.assertNotEqual(load_task(locate(self.repo))['task_id'],first)
     def test_migration_recovers_unmapped_obligations(self):
         source=self.old(requirements=[], work_items=[{'id':'W-01','text':'lost owner','req':None,'deps':[]}]); self.cli('migrate','--from-task',str(source),'--authority','explicit import')
         t=load_task(locate(self.repo)); self.assertGreater(len(t['requirements']),0); self.assertTrue(t['work']); self.cli('gate',code=1)
