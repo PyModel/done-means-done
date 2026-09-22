@@ -1,6 +1,8 @@
 """Content fingerprints include dirty and non-ignored untracked files; never execute repo code."""
 from __future__ import annotations
+import fnmatch
 import hashlib
+import json
 import os
 import re
 import stat
@@ -124,12 +126,28 @@ def head(root):
     raw = git(root, "rev-parse", "HEAD")
     return os.fsdecode(raw).strip() if raw else None
 
+def output_match(rel, globs):
+    """Whether a candidate-relative path is one of a check's declared outputs. A glob with
+    a slash matches the whole relative path; one without matches the file name anywhere,
+    as in .gitignore."""
+    name = rel.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(rel if "/" in g else name, g) for g in globs)
+
+def untracked(root):
+    """Untracked, non-ignored paths of a Git checkout; None outside Git."""
+    raw = git(root, "ls-files", "-z", "-o", "--exclude-standard")
+    return None if raw is None else {os.fsdecode(p) for p in raw.split(b"\0") if p}
+
 def fingerprint(root, inputs=(), depth=0):
     return snapshot(root, inputs, depth)["fingerprint"]
 
-def snapshot(root, inputs=(), depth=0):
+def snapshot(root, inputs=(), depth=0, exclude=()):
     """One walk yields the content fingerprint (unchanged scheme), the HEAD commit and a
-    per-path digest map, so drift can be diffed instead of merely detected."""
+    per-path digest map, so drift can be diffed instead of merely detected.
+
+    `exclude` holds the output globs checks on this candidate declared (check --writes).
+    Only untracked files matching them are left out; a tracked file is always hashed. With
+    no globs the fingerprint is byte-identical to earlier releases."""
     root = Path(root)
     if depth > 8:
         raise DmdError("nested repository depth exceeds 8")
@@ -156,6 +174,12 @@ def snapshot(root, inputs=(), depth=0):
             files.extend(str((Path(current) / n).relative_to(root)) for n in names)
     else:
         files = [os.fsdecode(p) for p in listing.split(b"\0") if p]
+    excluded = []
+    if exclude:
+        h.update(b"excluding\0" + json.dumps(sorted(set(exclude))).encode() + b"\0")
+        loose = set(files) if listing is None else (untracked(root) or set())
+        excluded = sorted(rel for rel in set(files) if rel in loose and output_match(rel, exclude))
+        files = sorted(set(files) - set(excluded))
     for rel in sorted(set(files)):
         path = root / rel
         if path.is_dir() and not path.is_symlink():
@@ -179,7 +203,7 @@ def snapshot(root, inputs=(), depth=0):
             continue
         h = _feed_file(h, path, "external:" + str(path), digests)
     return {"fingerprint": h.hexdigest(), "head": os.fsdecode(head_raw).strip() if head_raw else None,
-            "files": digests, "missing_inputs": missing}
+            "files": digests, "missing_inputs": missing, "excluded": excluded}
 
 def drift(before, after, limit=50):
     """What moved between two snapshots of the same candidate: HEAD and changed paths."""
@@ -220,10 +244,11 @@ def file_digest(path):
     except OSError as exc:
         return f"unreadable:{exc.errno}"
 
-def recent_writes(root, window):
+def recent_writes(root, window, exclude=()):
     """Dirty or untracked paths modified within the last `window` seconds. A file still
     being written by another session is a concurrent writer, not a candidate to test.
-    Outside Git nothing is reported."""
+    Untracked outputs a check declared (`exclude`) are not writers. Outside Git nothing
+    is reported."""
     if window <= 0:
         return []
     listing = git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
@@ -238,6 +263,8 @@ def recent_writes(root, window):
         code, rel = entry[:2], os.fsdecode(entry[3:])
         if code[:1] in (b"R", b"C"):
             i += 1  # the rename source follows as its own field
+        if code == b"??" and exclude and output_match(rel, exclude):
+            continue
         try:
             age = now - (Path(root) / rel).lstat().st_mtime
         except OSError:

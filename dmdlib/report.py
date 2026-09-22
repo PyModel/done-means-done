@@ -42,6 +42,8 @@ def sections(directory, t, g):
             lines.append("  Superseded: " + c["removed_reason"])
         if c.get("exclusive"):
             lines.append("  Exclusive: " + ", ".join(c["exclusive"]))
+        if c.get("writes"):
+            lines.append("  Outputs left out of the fingerprint (untracked only): " + ", ".join(c["writes"]))
         if c.get("receipt"):
             r = c["receipt"]
             lines.append("  Evidence: " + str(directory / r["artifact"]["path"]))

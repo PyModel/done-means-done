@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -13,9 +14,9 @@ import uuid
 from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
-from .source import candidate_root, drift, file_digest, location_file, recent_writes
+from .source import candidate_root, drift, file_digest, git, location_file, output_match, recent_writes
 from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, acceptance_reason, attested, check_candidate, check_definition, missing_inputs,
-                    contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
+                    candidate_outputs, contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, work_ok)
 from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
 from .store import (StateInsideProject, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
@@ -145,6 +146,29 @@ def trivial_command(command):
     return Path(first).name in ("echo", "printf", "true", ":") or first == ":"
 
 
+def output_globs(c):
+    """Validate a check's --writes globs: files the check generates (a junit report, a
+    coverage file), left out of its candidate's fingerprint. They may name only untracked
+    files, and must be specific enough not to hide new source files."""
+    globs = c.get("writes") or []
+    if not globs:
+        c.pop("writes", None)  # absent, so a check without outputs keeps its definition digest
+        return
+    literal = lambda text: re.search(r"[A-Za-z0-9_-]", text.replace("*", "").replace("?", ""))
+    for g in globs:
+        if not g.strip() or g.startswith("/") or ".." in g.split("/"):
+            raise DmdError(f"--writes {g!r} must be a pattern relative to the candidate root")
+        directory, _, name = g.rpartition("/")
+        if not literal(name.split(".", 1)[0]) and not literal(directory):
+            raise DmdError(f"--writes {g!r} is too broad; name the output (junit.xml, reports/*.xml), not every file of a type")
+    tracked = git(c["candidate"], "ls-files", "-z", "-c")
+    if tracked:
+        hits = [p for p in (os.fsdecode(x) for x in tracked.split(b"\0") if x) if output_match(p, globs)]
+        if hits:
+            raise DmdError(f"--writes matches tracked files ({', '.join(hits[:5])}); only generated, untracked outputs "
+                           "can leave the fingerprint")
+
+
 def supersede(t, record, kind, note):
     """Retire an agent-authored record. Requirements are operator-owned and never take this path."""
     reason = require_text(note, f"--note explaining why this {kind} is superseded")
@@ -263,7 +287,7 @@ def check(args):
                      "max_output": 1048576 if args.max_output is None else args.max_output, "inputs": args.input or [],
                      "regression": bool(args.regression), "red_match": args.red_match, "red_exit": 1 if args.red_exit is None else args.red_exit,
                      "attested_because": args.attested_because, "candidate": args.candidate,
-                     "exclusive": args.exclusive or [],
+                     "exclusive": args.exclusive or [], "writes": args.writes or [],
                      "status": "NOT_RUN", "receipt": None, "red": None, "baseline": None}
                 t["checks"].append(c)
             else:
@@ -273,7 +297,7 @@ def check(args):
                                   ("run_cwd", "cwd"), ("expect", "expect"), ("match", "match"), ("timeout", "timeout"),
                                   ("max_output", "max_output"), ("input", "inputs"), ("red_match", "red_match"),
                                   ("red_exit", "red_exit"), ("attested_because", "attested_because"),
-                                  ("candidate", "candidate"), ("exclusive", "exclusive")]:
+                                  ("candidate", "candidate"), ("exclusive", "exclusive"), ("writes", "writes")]:
                     value = getattr(args, flag)
                     if value is not None:
                         c[key] = value
@@ -294,6 +318,8 @@ def check(args):
                 c["inputs"] = []
             if args.clear_exclusive:
                 c["exclusive"] = []
+            if args.clear_writes:
+                c["writes"] = []
             c["inputs"] = [declared_input(c["cwd"], x) for x in c["inputs"]]
             # The candidate is the tree this check's evidence is bound to. Default: the task
             # root when the check runs inside it, else the checkout its cwd belongs to.
@@ -307,6 +333,7 @@ def check(args):
                 c["candidate"] = candidate_root(c["cwd"], t["root"])
             for tag in c.get("exclusive") or []:
                 ident(tag)
+            output_globs(c)
             if attested(c) and not str(c.get("attested_because") or "").strip():
                 raise DmdError(f"--attested-because is required for a {c['method']} check: state why no "
                                "command can observe this behavior. Attested checks are reported as self-attested "
@@ -384,8 +411,9 @@ def preflight(t, checks, window):
     an integration run and rejecting its receipt afterwards."""
     candidates = sorted({check_candidate(c, t["root"]) for c in checks})
     problems = []
+    outputs = candidate_outputs(t)
     for cand in candidates:
-        writes = recent_writes(cand, window)
+        writes = recent_writes(cand, window, outputs.get(cand, ()))
         if writes:
             # The normal agent turn is edit-then-verify. Wait (bounded by SETTLE_SECONDS)
             # for the newest write to age past the window, then re-check; refuse only a
@@ -393,7 +421,7 @@ def preflight(t, checks, window):
             wait = window - writes[0]["age_s"]
             if 0 < wait <= SETTLE_SECONDS:
                 time.sleep(wait + 0.05)
-                writes = recent_writes(cand, window)
+                writes = recent_writes(cand, window, outputs.get(cand, ()))
         if writes:
             named = ", ".join(f"{w['path']} ({w['age_s']}s ago)" for w in writes[:5])
             more = f" and {len(writes) - 5} more" if len(writes) > 5 else ""
@@ -1063,7 +1091,7 @@ def parser():
     s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"])
     for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence", "candidate", "approve"]:
         s.add_argument("--" + flag)
-    s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--clear-inputs", action="store_true"); s.add_argument("--clear-exclusive", action="store_true"); s.add_argument("--exclusive", action="append"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because"); s.add_argument("--json", action="store_true")
+    s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--clear-inputs", action="store_true"); s.add_argument("--clear-exclusive", action="store_true"); s.add_argument("--exclusive", action="append"); s.add_argument("--writes", action="append"); s.add_argument("--clear-writes", action="store_true"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because"); s.add_argument("--json", action="store_true")
     s = command("preview", preview); s.add_argument("id")
     s = command("approve", approve); s.add_argument("id"); s.add_argument("--note", required=True)
     s = command("run", run); s.add_argument("ids", nargs="*"); s.add_argument("--all", action="store_true"); s.add_argument("--red", action="store_true"); s.add_argument("--quiet-window", type=float); s.add_argument("--wait-exclusive", type=float)

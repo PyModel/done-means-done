@@ -525,3 +525,47 @@ class ReasonCase(GitFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeclaredOutputsCase(GitFixture):
+    """R2: a check that writes an untracked report (junit.xml) can pass and stay current."""
+    WRITER = "python3 -B verify.py && python3 -B -c \"open('junit.xml','w').write('<ok/>')\""
+
+    def committed_task(self):
+        self.git("init", "-q"); self.git("add", "."); self.git("commit", "-q", "-m", "base")
+        self.setup_task()
+
+    def verdicts(self):
+        out, _ = self.cmd("status", "--json")
+        return json.loads(out)["gate"]["summary"]["checks"]
+
+    def test_undeclared_output_makes_the_run_stale(self):
+        self.committed_task()
+        cid = self.add_check(self.repo, command=self.WRITER)
+        out, _ = self.cmd("run", cid, *QUIET, code=1)
+        self.assertEqual(json.loads(out.splitlines()[0])["result"], "STALE")
+
+    def test_declared_output_passes_and_leaves_sibling_checks_current(self):
+        self.committed_task()
+        self.cmd("run", "A-01", *QUIET)
+        cid = self.add_check(self.repo, command=self.WRITER, extra=("--writes", "junit.xml"))
+        self.cmd("run", "A-01", cid, *QUIET)
+        self.cmd("run", cid, *QUIET)  # rewrites junit.xml within the quiet window of the last run
+        self.assertEqual(sorted(self.verdicts()["accepted"]), ["A-01", cid])
+        (self.repo / "subject.py").write_text("VALUE = 42  # edited\n")
+        self.assertEqual(sorted(self.verdicts()["stale"]), ["A-01", cid], "a source edit still stales both")
+
+    def test_writes_may_not_name_tracked_or_every_file(self):
+        self.committed_task()
+        for glob, message in (("subject.py", "tracked files"), ("*.py", "too broad"), ("../x", "relative")):
+            _, err = self.cmd("check", "add", "--req", "R-01", "--cmd", "python3 -B verify.py", "--expect", "x",
+                              "--match", "ACCEPTANCE_PASS:1", "--writes", glob, code=2)
+            self.assertIn(message, err)
+
+    def test_fingerprint_is_unchanged_without_declared_outputs(self):
+        from dmdlib.source import snapshot
+        self.committed_task()
+        self.assertEqual(snapshot(self.repo)["fingerprint"], snapshot(self.repo, exclude=())["fingerprint"])
+        before = task_fingerprint(load_task(locate(self.repo)))
+        self.add_check(self.repo)
+        self.assertEqual(task_fingerprint(load_task(locate(self.repo))), before)
