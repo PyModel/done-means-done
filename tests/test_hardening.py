@@ -95,7 +95,8 @@ class IsolationCase(HookHarness):
 
     def test_cwd_that_is_a_file_is_ignored(self):
         self.setup_task(); f = self.home / "afile"; f.write_text("x")
-        out, err = self.hook("session-start", cwd=f, code=0); self.assertEqual((out, err), ("", ""))
+        out, err = self.hook("session-start", cwd=f, code=0); self.assertEqual(err, "")
+        self.assertIn("cannot evaluate it from", json.loads(out)["systemMessage"])
 
     def test_loose_state_root_permissions_report_not_block(self):
         self.setup_task(); self.enforce(); os.chmod(self.state, 0o755)
@@ -118,11 +119,11 @@ class IsolationCase(HookHarness):
         self.assertLessEqual(len(t["sessions"]), 50); self.assertNotIn("s-59", t["sessions"]); self.assertIn(digest("s-59"), t["sessions"])
         self.assertLessEqual(len(t.get("watchdogs", {})), 50)
 
-    def test_watchdog_pause_names_the_session(self):
+    def test_watchdog_release_names_the_session(self):
         self.setup_task(); self.enforce(); self.cmd("config", "--max-no-progress", "1")
         self.hook("stop"); out, _ = self.hook("stop")
-        self.assertIn("paused", json.loads(out)["systemMessage"])
-        self.assertIn(digest("session-test")[:12], load_task(locate(self.repo))["state_reason"])
+        self.assertIn("released", json.loads(out)["systemMessage"])
+        self.assertIn(digest("session-test")[:12], load_task(locate(self.repo))["released"]["reason"])
 
     def test_git_discovery_failure_does_not_rekey_the_task(self):
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True); self.setup_task()

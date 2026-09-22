@@ -170,17 +170,22 @@ class RuntimeCase(DmdFixture):
         self.setup_task(); self.cmd("config", "--mode", "enforce")
         out, _ = self.cmd("hook", "stop", stdin=self.payload()); self.assertEqual(json.loads(out)["decision"], "block")
         out, _ = self.cmd("hook", "stop", stdin=self.payload(stop_hook_active=True)); self.assertEqual(json.loads(out)["decision"], "block")
-    def test_watchdog_pauses_without_claiming_completion(self):
+    def test_watchdog_releases_the_stop_but_never_the_obligations(self):
         self.setup_task(); self.cmd("config", "--mode", "enforce", "--max-no-progress", "2")
-        for _ in range(3): self.cmd("hook", "stop", stdin=self.payload(stop_hook_active=True))
-        self.assertEqual(load_task(locate(self.repo))["state"], "PAUSED")
-    def test_explicit_resume_resets_no_progress_watchdogs(self):
+        outs = [json.loads(self.cmd("hook", "stop", stdin=self.payload(stop_hook_active=True))[0]) for _ in range(3)]
+        self.assertEqual([o.get("decision") for o in outs], ["block", "block", None])
+        self.assertIn("released", outs[2]["systemMessage"])
+        t = load_task(locate(self.repo)); self.assertEqual(t["state"], "ACTIVE"); self.assertIn("released", t)
+        # The next stop is governed again, and a new session is told why the last one ended.
+        self.assertEqual(json.loads(self.cmd("hook", "stop", stdin=self.payload())[0]).get("decision"), "block")
+        out, _ = self.cmd("hook", "session-start", stdin=self.payload(session_id="next-session"))
+        self.assertIn("stopped without verified progress", out)
+    def test_release_note_clears_after_verified_progress(self):
         self.setup_task(); self.cmd("config", "--mode", "enforce", "--max-no-progress", "1")
         for _ in range(2): self.cmd("hook", "stop", stdin=self.payload())
-        self.assertEqual(load_task(locate(self.repo))["state"], "PAUSED")
-        self.cmd("state", "ACTIVE", "--reason", "Operator resumed after diagnostic inspection")
-        out, _ = self.cmd("hook", "stop", stdin=self.payload())
-        self.assertEqual(json.loads(out).get("decision"), "block")
+        self.assertIn("released", load_task(locate(self.repo)))
+        self.cmd("run", "A-01"); self.cmd("hook", "stop", stdin=self.payload())
+        self.assertNotIn("released", load_task(locate(self.repo)))
     def test_invalid_session_rejected_before_task_activation(self):
         self.cmd("init", "-m", "authorized request", "--authority", "operator", "--session", "x" * 513, code=2)
         self.assertIsNone(locate(self.repo))
@@ -200,12 +205,21 @@ class RuntimeCase(DmdFixture):
         self.cmd("run", "A-01"); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
         self.cmd("hook", "task-completed", stdin=self.payload(task_id="native-42"))
         self.cmd("gate", code=1)
-    def test_stop_revalidates_stored_complete_after_source_change(self):
+    def test_complete_is_final_for_hooks_but_the_gate_stays_honest(self):
+        # A finished assignment must not govern later, unrelated work in the same worktree.
         self.setup_task(); self.finalize(); self.cmd("config", "--mode", "enforce"); (self.repo / "subject.py").write_text("VALUE = 43\n")
+        out, _ = self.cmd("hook", "stop", stdin=self.payload(session_id="later-session")); self.assertEqual(out, "")
+        self.assertEqual(json.loads(self.cmd("gate", code=1)[0])["status"], "ACTIVE")
+    def test_new_obligation_reopens_a_complete_task(self):
+        self.setup_task(); self.finalize(); self.cmd("config", "--mode", "enforce")
+        self.cmd("req", "add", "Follow-up outcome", "--anchor", "operator follow-up")
+        self.assertEqual(load_task(locate(self.repo))["state"], "ACTIVE")
         out, _ = self.cmd("hook", "stop", stdin=self.payload()); self.assertEqual(json.loads(out)["decision"], "block")
-    def test_session_binding_does_not_follow_another_active_task(self):
+    def test_init_new_moves_the_session_to_the_new_assignment(self):
+        # Otherwise `init --new` would leave the session on a paused task no hook enforces.
         self.setup_task(); old = locate(self.repo); self.cmd("init", "-m", "other", "--authority", "operator", "--new")
-        out, _ = self.cmd("hook", "session-start", stdin=self.payload()); self.assertIn(load_task(old)["task_id"], out); self.assertIn("PAUSED", out)
+        self.assertEqual(load_task(old)["state"], "PAUSED")
+        out, _ = self.cmd("hook", "session-start", stdin=self.payload()); self.assertIn(load_task(locate(self.repo))["task_id"], out)
     def test_session_id_cannot_traverse_state_paths(self):
         self.setup_task(); self.cmd("bind-session", "../../escape")
         self.assertTrue((self.state / "sessions").exists()); self.assertFalse((self.home / "escape.json").exists())

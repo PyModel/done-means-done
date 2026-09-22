@@ -7,7 +7,8 @@ from pathlib import Path
 from dmdlib import model as m
 from dmdlib.storage import digest, evidence, private_dir
 
-class ModelCase(unittest.TestCase):
+class ModelFixture(unittest.TestCase):
+    """Synthetic COMPLETE task; no tests of its own so subclasses do not rerun them."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -40,6 +41,8 @@ class ModelCase(unittest.TestCase):
     def finding(self, **updates):
         f = {"id": "F-01", "text": "observed defect", "location": "source.txt:1", "status": "confirmed", "origin": "pre-existing", "work": [], "checks": [], "note": ""}
         f.update(updates); self.t["findings"].append(f); return f
+
+class ModelCase(ModelFixture):
     def test_clean_fixture_completes(self): self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_sole_attested_check_cannot_accept_a_requirement(self):
         self.c["method"] = "manual"; self.c["attested_because"] = "inherently observed by a person"
@@ -59,7 +62,7 @@ class ModelCase(unittest.TestCase):
         # The CLI refuses to supersede a requirement's last check; the predicate refuses
         # the resulting state too, so a hand-edited record cannot complete on nothing.
         self.c["removed"] = True; self.c["removed_reason"] = "replaced"; self.seal()
-        self.blocked("missing work or acceptance mapping")
+        self.blocked("R-01: missing acceptance check")
     def test_superseded_work_owes_nothing_but_is_retained(self):
         self.t["work"].append({"id": "W-02", "req": "R-01", "text": "abandoned approach", "status": "todo",
                                "deps": [], "owns": [], "note": "", "removed": True, "removed_reason": "replaced by W-01"})
@@ -74,7 +77,7 @@ class ModelCase(unittest.TestCase):
     def test_omitted_new_requirement_invalidates_coverage(self):
         self.t["requirements"].append({"id": "R-02", "text": "second outcome", "anchor": "ask two", "status": "active"}); self.blocked("coverage")
     def test_missing_work_is_not_accepted(self): self.t["work"] = []; self.blocked()
-    def test_missing_check_is_not_accepted(self): self.t["checks"] = []; self.seal(); self.blocked("missing work or acceptance")
+    def test_missing_check_is_not_accepted(self): self.t["checks"] = []; self.seal(); self.blocked("R-01: missing acceptance check")
     def test_orphan_work_is_invalid(self): self.t["work"][0]["req"] = None; self.blocked("invalid requirement")
     def test_duplicate_requirement_ids_invalid(self): self.t["requirements"].append(copy.deepcopy(self.t["requirements"][0])); self.blocked("duplicate")
     def test_dependency_missing_invalid(self): self.t["work"][0]["deps"] = ["W-99"]; self.blocked("missing dependency")
@@ -83,10 +86,20 @@ class ModelCase(unittest.TestCase):
         self.t["work"] = [{"id": f"W-{n:04d}", "req": "R-01", "text": "step", "status": "todo", "deps": [f"W-{n-1:04d}"] if n else [], "owns": []} for n in range(1500)]
         self.c["work"] = ["W-0000"]
         self.assertEqual(m.validation_errors(self.t), [])
-    def test_explicit_check_to_work_mapping_required(self): self.c["work"] = []; self.blocked("mapping")
+    def test_planned_work_without_a_mapped_check_blocks(self):
+        # Planned work cannot silently vanish: it needs its own evidence or an explicit supersede.
+        self.c["work"] = []; self.c["receipt"]["definition"] = digest(m.check_definition(self.c)); self.seal()
+        self.blocked("W-01: no mapped acceptance check")
+    def test_requirement_level_check_without_work_items_completes(self):
+        # Work items are the agent's optional decomposition; the requirement's evidence is what counts.
+        self.t["work"] = []; self.c["work"] = []; self.c["receipt"]["definition"] = digest(m.check_definition(self.c)); self.seal()
+        self.assertEqual(self.gate()["status"], "COMPLETE", self.gate())
     def test_check_work_cannot_cross_requirement(self):
         self.t["requirements"].append({"id": "R-02", "text": "other", "anchor": "ask two", "status": "active"}); self.c["req"] = "R-02"; self.blocked("another requirement")
-    def test_unverified_work_blocks(self): self.t["work"][0]["status"] = "implemented"; self.seal(); self.blocked("W-01")
+    def test_work_status_is_a_progress_note_not_proof(self):
+        self.t["work"][0]["status"] = "implemented"; self.seal(); self.assertEqual(self.gate()["status"], "COMPLETE")
+    def test_work_without_current_evidence_blocks(self):
+        self.c["status"] = "FAIL"; self.seal(); self.blocked("W-01: checks owed: A-01")
     def test_changed_source_is_stale(self): (self.repo / "source.txt").write_text("changed\n"); self.blocked("A-01")
     def test_changed_definition_is_stale(self): self.c["command"] = "python3 different.py"; self.seal(); self.blocked("A-01")
     def test_missing_receipt_not_accepted(self): self.c["receipt"] = None; self.seal(); self.blocked("A-01")

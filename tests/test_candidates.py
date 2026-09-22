@@ -445,7 +445,7 @@ class ReasonCase(GitFixture):
         self.cmd("run", "A-01", *QUIET, code=1)
         g = json.loads(self.cmd("gate", code=1)[0])
         self.assertIn("A-01: FAIL: exit or match failed; fix and rerun", g["reasons"])
-        self.assertIn("W-01: status todo, not verified; checks owed: A-01", g["reasons"])
+        self.assertIn("W-01: checks owed: A-01", g["reasons"])
         self.assertEqual(g["summary"]["checks"]["failed"], ["A-01"])
         _, err = self.cmd("work", "set", "--id", "W-01", "--status", "verified", code=2)
         self.assertIn("A-01: FAIL", err)
@@ -454,7 +454,7 @@ class ReasonCase(GitFixture):
         self.setup_task(); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
         (self.repo / "subject.py").write_text("VALUE = 43\n")
         g = json.loads(self.cmd("gate", code=1)[0])
-        self.assertIn("W-01: verified, but evidence is not current for A-01", g["reasons"])
+        self.assertIn("W-01: checks owed: A-01", g["reasons"])
         self.assertEqual([x["action"] for x in g["next"] if x["id"] == "W-01"], ["rerun stale evidence: A-01"])
         self.assertEqual(g["summary"]["work_unverified"], ["W-01"])
 

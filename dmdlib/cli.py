@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import json
 import os
+import signal
 import socket
 import sys
 import time
@@ -107,7 +108,11 @@ def edit(args, kind):
         t = load_task(directory)
         if t["state"] == "CANCELLED" and kind not in ("state",):
             raise DmdError("task is cancelled; explicit operator-authorized reactivation is required")
+        before = contract_digest(t)
         yield directory, t
+        if t["state"] == "COMPLETE" and contract_digest(t) != before:
+            # New or changed obligations reopen a finished task, so the hooks govern it again.
+            t["state"] = "ACTIVE"
         errors = validation_errors(t)
         if errors:
             raise DmdError("; ".join(errors))
@@ -130,6 +135,19 @@ def bind_session(directory, session):
                 with contextlib.suppress(OSError):
                     stale.unlink()
     atomic(sessions / (digest(session) + ".json"), json.dumps({"task_dir": str(directory), "session_hash": digest(session)}))
+
+
+def rebind_sessions(old, new):
+    """Sessions bound to a superseded task follow the worktree to its new assignment;
+    otherwise they would stay on a paused task that no hook enforces."""
+    sessions = state_root() / "sessions"
+    for binding in sessions.glob("*.json") if sessions.is_dir() else []:
+        try:
+            record = read_json(binding)
+        except (DmdError, OSError):
+            continue
+        if record.get("task_dir") == str(old):
+            atomic(binding, json.dumps(dict(record, task_dir=str(new))))
 
 
 def create_task(args, request, authorization, require_review=False, prepare=None):
@@ -169,6 +187,8 @@ def create_task(args, request, authorization, require_review=False, prepare=None
         private_dir(directory)
         save(directory, t, "init")
         atomic(base / "active.json", json.dumps({"task_id": task_id}))
+        if old:
+            rebind_sessions(old, directory)
     if getattr(args, "session", None):
         bind_session(directory, args.session)
     return directory, t
@@ -221,6 +241,12 @@ def req(args):
             print(r["id"] + " may be accepted on attestation alone under recorded operator authority")
         else:
             r = get(t["requirements"], args.id)
+            mine = {w["id"] for w in t["work"] if w["req"] == r["id"]}
+            stranded = [w["id"] for w in live(t["work"]) if w["req"] != r["id"] and set(w["deps"]) & mine
+                        and get(t["requirements"], w["req"])["status"] == "active"]
+            if stranded:
+                raise DmdError(f"{', '.join(stranded)} depend on work under {r['id']}; replan them first "
+                               f"(dmd work set --id W-XX --clear-deps, then --dep as needed)")
             r["status"] = "removed"
             r["authority"] = require_text(args.authority, "explicit operator removal instruction")
             t["amendments"].append({"at": now(), "text": r["authority"], "requirement": r["id"]})
@@ -319,6 +345,8 @@ def work(args):
                 w.setdefault("history", []).append({"at": now(), "text": w["text"], "reason": args.note})
                 w["text"] = args.replace
                 w["status"] = "todo"
+            if args.clear_deps:
+                w["deps"] = []
             if args.dep is not None:
                 w["deps"] = args.dep
             if args.owns is not None:
@@ -418,7 +446,14 @@ def check(args):
                     raise DmdError("--attested-because applies only to manual, review or browser checks")
                 if trivial_command(c["command"]):
                     raise DmdError("a bare success printer is not an acceptance check")
-            print(c["id"])
+            if args.approve is not None:
+                # One call for author-and-approve. The inspection it attests is the same as
+                # dmd approve; an edit still clears it, so edited text never runs uninspected.
+                if c["method"] != "command":
+                    raise DmdError("--approve applies only to command checks")
+                t["approvals"][c["id"]] = {"signature": digest(approval_parts(c)), "parts": approval_parts(c),
+                                           "note": require_text(args.approve, "--approve note naming what you inspected"), "at": now()}
+            print(c["id"] + (" (approved)" if args.approve is not None else ""))
         elif args.action == "set":
             c = get(t["checks"], args.id)
             if c.get("needs_review") and args.status == "PASS":
@@ -553,7 +588,27 @@ def select_checks(t, ids, everything):
     return [get(t["checks"], cid) for cid in ids]
 
 
+@contextlib.contextmanager
+def interruptible():
+    """SIGTERM and SIGHUP (a host tool timeout, a closed terminal) take the same path as
+    Ctrl-C: the check's process group is terminated and the run is recorded as interrupted,
+    instead of the runner dying and leaving the check executing unsupervised."""
+    def stop(signum, frame):
+        raise KeyboardInterrupt(f"signal {signum}")
+    previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGHUP)}
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
 def run(args):
+    with interruptible():
+        return _run(args)
+
+
+def _run(args):
     directory = need(args)
     with lock(directory, ".run.lock"):
         with lock(directory):
@@ -722,6 +777,8 @@ def finding(args):
             t["findings"].append({"id": fid, "text": require_text(args.text, "finding"),
                                   "location": require_text(args.location, "--location"), "origin": args.origin or "unknown",
                                   "status": status, "work": [], "checks": [], "note": args.note or ""})
+            if status == "confirmed":
+                t["findings"][-1]["confirmed_at"] = now()
             print(fid)
         elif args.action == "defer":
             f = get(t["findings"], args.id)
@@ -739,6 +796,8 @@ def finding(args):
                 raise DmdError(f"{args.status} requires operator authority: use dmd finding defer --id {f['id']} --authority '...' --note '...'")
             if args.status:
                 f["status"] = args.status
+                if args.status == "confirmed":
+                    f.setdefault("confirmed_at", now())
             if args.origin:
                 f["origin"] = args.origin
             if args.work is not None:
@@ -752,6 +811,10 @@ def finding(args):
             if f["status"] == "disproved":
                 f["artifact"] = artifact_from_file(directory, args.evidence)
                 f["source"] = source_digest(task_fingerprint(t))
+                from .model import assess
+                reason = assess(directory, t, task_fingerprint(t)).findings.get(f["id"])
+                if reason:
+                    raise DmdError(reason)
             if f["status"] == "duplicate":
                 target = require_text(args.duplicate, "--duplicate canonical finding ID")
                 get(t["findings"], target)
@@ -1253,9 +1316,9 @@ def parser():
         s = sub.add_parser(name, help=HELP[name], description=HELP[name]); s.set_defaults(func=fn); return s
     s = command("init", init); s.add_argument("-m", "--message"); s.add_argument("--request-file"); s.add_argument("--authority", required=True); s.add_argument("--session"); s.add_argument("--new", action="store_true"); s.add_argument("--independent-review", action="store_true")
     s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--authority"); s.add_argument("--json", action="store_true")
-    s = command("work", work); s.add_argument("action", choices=["add", "set", "remove", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace"); s.add_argument("--json", action="store_true")
+    s = command("work", work); s.add_argument("action", choices=["add", "set", "remove", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace"); s.add_argument("--clear-deps", action="store_true"); s.add_argument("--json", action="store_true")
     s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"])
-    for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence", "candidate"]:
+    for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence", "candidate", "approve"]:
         s.add_argument("--" + flag)
     s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--clear-inputs", action="store_true"); s.add_argument("--clear-exclusive", action="store_true"); s.add_argument("--exclusive", action="append"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because"); s.add_argument("--json", action="store_true")
     s = command("preview", preview); s.add_argument("id")

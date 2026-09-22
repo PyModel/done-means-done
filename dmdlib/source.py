@@ -51,14 +51,35 @@ def identity(cwd):
     project = digest(os.fsdecode(common).rstrip("\n") if common else str(root))[:24]
     return root, project, digest(str(root))[:24]
 
+class _Changed(DmdError):
+    """A file moved while it was being read."""
+
+# A file rewritten during every read (an append-only log a dev server keeps open) is
+# hashed as volatile drift after this many attempts instead of aborting the snapshot.
+VOLATILE_ATTEMPTS = 3
+
 def _feed_file(tree, path, label, files=None):
-    h = _Tee(tree)
-    h.update(os.fsencode(label) + b"\0")
-    try:
-        _feed_body(h, path)
-    finally:
+    """Return the tree hash with this file fed. A read that races a writer is retried
+    from a copy of the hash state, so a stable file hashes exactly as before and a file
+    that never settles becomes visible drift rather than an exception that disables the
+    gate and every hook."""
+    for _ in range(VOLATILE_ATTEMPTS):
+        attempt = tree.copy()
+        h = _Tee(attempt)
+        h.update(os.fsencode(label) + b"\0")
+        try:
+            _feed_body(h, path)
+        except _Changed:
+            continue
         if files is not None:
             files[label] = h.own.hexdigest()
+        return attempt
+    attempt = tree.copy()
+    h = _Tee(attempt)
+    h.update(os.fsencode(label) + b"\0volatile\0")
+    if files is not None:
+        files[label] = "volatile"
+    return attempt
 
 def _feed_body(h, path):
     try:
@@ -82,13 +103,13 @@ def _feed_body(h, path):
         try:
             opened = os.fstat(fd)
             if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-                raise DmdError(f"source changed while opening: {path}")
+                raise _Changed(f"source changed while opening: {path}")
             with os.fdopen(fd, "rb", closefd=False) as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b""):
                     h.update(block)
             after = path.lstat()
             if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
-                raise DmdError(f"source changed during fingerprint: {path}")
+                raise _Changed(f"source changed during fingerprint: {path}")
         finally:
             os.close(fd)
         h.update(b"\0")
@@ -141,7 +162,7 @@ def snapshot(root, inputs=(), depth=0):
             h.update(os.fsencode(rel) + b"\0submodule\0" + inner["fingerprint"].encode())
             digests[rel] = inner["fingerprint"]
         else:
-            _feed_file(h, path, rel, digests)
+            h = _feed_file(h, path, rel, digests)
     missing = []
     for item in sorted(set(inputs)):
         path = Path(item)
@@ -155,7 +176,7 @@ def snapshot(root, inputs=(), depth=0):
             h.update(os.fsencode("external:" + str(path)) + b"\0missing-input\0")
             digests["external:" + str(path)] = "missing"
             continue
-        _feed_file(h, path, "external:" + str(path), digests)
+        h = _feed_file(h, path, "external:" + str(path), digests)
     return {"fingerprint": h.hexdigest(), "head": os.fsdecode(head_raw).strip() if head_raw else None,
             "files": digests, "missing_inputs": missing}
 
@@ -198,6 +219,6 @@ def recent_writes(root, window):
             age = now - (Path(root) / rel).lstat().st_mtime
         except OSError:
             continue
-        if age < window:
+        if 0 <= age < window:  # a future timestamp (clock skew, archive extraction) is not a live writer
             found.append({"path": rel, "age_s": round(max(age, 0), 3)})
     return sorted(found, key=lambda x: x["age_s"])
