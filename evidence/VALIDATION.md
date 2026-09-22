@@ -141,7 +141,7 @@ Trigger: cleaning the state root of this machine found 39 empty record directori
 | Check | Result |
 |---|---|
 | `NoLeftovers.test_a_folder_without_a_task_leaves_nothing_in_the_state_root`: SessionStart, Stop, PostToolUse, PreToolUse and `next` from a Git folder with no task | No `v2/` directory is created (on 0.7.0 code: `v2/<project>/<worktree>` appeared) |
-| `NoLeftovers.test_gc_removes_empty_record_directories_only` | `gc` removes an empty project/worktree pair older than a minute; the live task's directory is untouched |
+| `NoLeftovers.test_gc_removes_empty_record_directories_only` | `gc` removes an empty project/worktree pair and one holding only the active pointer and lock of a deleted task, each older than a minute; the live task's directory is untouched |
 | `NextActionsAreRunnable.test_a_regression_check_without_a_baseline_names_every_way_out` | The action names `run --red`, `check baseline --evidence -` and `check edit --no-regression` |
 | Full suite, macOS Python 3.14.7; Linux Docker `python:3.10` | `DMD_TESTS_PASS:341;skipped=0`, [transcript](tests-final.log) |
 

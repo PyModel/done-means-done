@@ -379,9 +379,13 @@ def prune_tickets(max_age=TICKET_TTL_SECONDS):
                 ticket.unlink(); removed += 1
     return removed
 
+# What a worktree directory holds besides its task records: the active pointer and the lock.
+RECORD_DIR_BOOKKEEPING = ("active.json", ".lock")
+
 def prune_empty_record_dirs(min_age=60):
-    """Remove project and worktree directories that hold nothing (left by versions before
-    0.7.1, which created them on every lookup). A directory younger than `min_age` seconds
+    """Remove project and worktree directories that hold no task record: the empty ones
+    versions before 0.7.1 created on every lookup, and those whose tasks were deleted
+    (only the active pointer and lock remain). A directory younger than `min_age` seconds
     may belong to a task being created right now and is kept."""
     removed = 0
     top = state_root() / "v2"
@@ -393,6 +397,9 @@ def prune_empty_record_dirs(min_age=60):
                if d.is_dir() and not d.is_symlink() and time.time() - d.stat().st_mtime > min_age]
         for directory in old:
             with contextlib.suppress(OSError):
+                if directory != project and all(p.name in RECORD_DIR_BOOKKEEPING and p.is_file() for p in directory.iterdir()):
+                    for name in RECORD_DIR_BOOKKEEPING:
+                        (directory / name).unlink(missing_ok=True)
                 directory.rmdir(); removed += 1  # refused, and skipped, unless empty
     return removed
 

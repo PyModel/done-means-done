@@ -563,11 +563,13 @@ class NoLeftovers(test_runtime.DmdFixture):
         import os, time
         self.setup_task()
         empty = self.state / "v2" / "p" / "w"; empty.mkdir(parents=True, mode=0o700)
-        for d in (empty, empty.parent):
+        orphan = self.state / "v2" / "q" / "w"; orphan.mkdir(parents=True, mode=0o700)
+        (orphan / "active.json").write_text('{"task_id": "T-deleted"}'); (orphan / ".lock").write_text("")
+        for d in (empty, empty.parent, orphan, orphan.parent):
             os.utime(d, (time.time() - 3600,) * 2)
         out, _ = self.cmd("gc")
-        self.assertEqual(json.loads(out)["empty_record_directories_removed"], 2)
-        self.assertFalse(empty.parent.exists()); self.assertTrue(locate(self.repo))
+        self.assertEqual(json.loads(out)["empty_record_directories_removed"], 4)
+        self.assertFalse(empty.parent.exists()); self.assertFalse(orphan.parent.exists()); self.assertTrue(locate(self.repo))
 
     def test_gc_prunes_stale_confirmation_tickets(self):
         import os, time

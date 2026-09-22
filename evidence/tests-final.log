@@ -124,7 +124,7 @@ test_a_live_run_is_not_a_no_progress_loop (test_completion.StopGovernance.test_a
 test_accepted_evidence_is_progress (test_completion.StopGovernance.test_accepted_evidence_is_progress) ... ok
 test_adding_records_is_not_progress (test_completion.StopGovernance.test_adding_records_is_not_progress) ... ok
 test_cd_into_a_subdirectory_keeps_the_task_governing (test_completion.StopGovernance.test_cd_into_a_subdirectory_keeps_the_task_governing) ... ok
-test_sibling_worktree_follows_its_own_task_but_not_an_empty_one (test_completion.StopGovernance.test_sibling_worktree_follows_its_own_task_but_not_an_empty_one) ... │  No config files with names ["lefthook" ".lefthook" ".config/lefthook"] have been found in "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/tmp418ttgc8/project"
+test_sibling_worktree_follows_its_own_task_but_not_an_empty_one (test_completion.StopGovernance.test_sibling_worktree_follows_its_own_task_but_not_an_empty_one) ... │  No config files with names ["lefthook" ".lefthook" ".config/lefthook"] have been found in "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/tmpdd_krbwi/project"
 ok
 test_unrelated_project_releases_the_binding (test_completion.StopGovernance.test_unrelated_project_releases_the_binding) ... ok
 test_no_module_imports_the_cli (test_completion.StoreBoundary.test_no_module_imports_the_cli) ... ok
@@ -344,7 +344,7 @@ test_watchdog_releases_the_stop_but_never_the_obligations (test_runtime.RuntimeC
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 341 tests in 96.518s
+Ran 341 tests in 84.778s
 
 OK
 DMD_TESTS_PASS:341;skipped=0
