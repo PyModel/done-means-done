@@ -1,6 +1,10 @@
 # Security and trust boundaries
 
-**The runtime is local cooperative enforcement, not a sandbox against its own user.** State, captured evidence and the skill itself may be writable by the same agent account. Integrity digests detect accidental/mismatched edits but cannot prevent an actor rewriting both data and digests. Approval notes, operator-authority fields, coverage and reviewer identity are attestations, not authenticated identities.
+**The runtime is local cooperative enforcement, not a sandbox against its own user.** State, captured evidence and the skill itself may be writable by the same agent account. Integrity digests detect accidental/mismatched edits but cannot prevent an actor rewriting both data and digests. Approval notes, coverage and reviewer identity are attestations, not authenticated identities.
+
+## Operator decisions
+
+An `--authority` flag is text the agent types. With the hooks installed and in enforce mode, a contract change (cancel, attest-only, defer, pause/cancel/resume, independent review, supersede, hook config, relocate, running a hook by hand, removing the hooks) is put to the operator by the host's permission prompt, the one step the agent cannot answer for itself, and counts only once the approval is recorded ([ADR 0003](../docs/adr/0003-operator-decisions.md)). That raises the cost of a false decision from typing a flag to forging hook payloads or editing state files by hand; it does not make local files tamper-proof. The command matcher covers the usual invocations (a path to `dmd`, `sh -c`, an argv list in a script) and not every possible one: a decision made outside the prompt is recorded unconfirmed and the gate keeps owing it. Without the channel, decisions are reported as never confirmed.
 
 ## Command execution
 

@@ -51,7 +51,7 @@ python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --apply
 dmd config --mode enforce
 ```
 
-Until that last command the mode is `observe`, which records and reports without redirecting anything. The installer merges into your existing settings, backs up what it changes, leaves unrelated hooks alone, and can remove exactly what it added. Start a new session afterward.
+Until that last command the mode is `observe`, which records and reports without redirecting anything. In `enforce` mode the host also asks you before the agent cancels a requirement, defers a defect, pauses the task or lowers enforcement; rerun `install.py --apply` after upgrading so that PreToolUse hook is registered. The installer merges into your existing settings, backs up what it changes, leaves unrelated hooks alone, and can remove exactly what it added. Start a new session afterward.
 
 Then invoke it:
 

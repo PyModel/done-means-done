@@ -14,7 +14,7 @@ On entry, this file and the output of `dmd reconcile` are the reading list; the 
 
 State changes persist as they happen. Generate a handoff before planned compaction or transfer, but do not rely on a final callback to save everything. A process can disappear before receiving one.
 
-`PAUSED` and `CANCELLED` never authorize automatic reactivation. The operator can explicitly resume after reviewing the checkpoint. `init --new` preserves an unfinished previous task as paused; it is for a genuinely new assignment, not skipping obligations. Explicit import is required for older schema-1 records.
+`PAUSED` and `CANCELLED` never authorize automatic reactivation. The operator can explicitly resume after reviewing the checkpoint. If the gate owes `AU-XX: ... awaits the operator's confirmation`, a contract change was recorded without the operator's approval: ask the operator (`dmd authority confirm AU-XX` puts it to them through the host prompt), or undo it with `dmd authority withdraw AU-XX`. In a headless `claude -p` run nobody can approve a prompt: such a command is denied before it runs, and an already-recorded unconfirmed decision can only be withdrawn. `init --new` preserves an unfinished previous task as paused; it is for a genuinely new assignment, not skipping obligations. Explicit import is required for older schema-1 records.
 
 ## External effects and interrupted verification
 
@@ -39,10 +39,11 @@ Installation is explicit. The adapters read documented event payloads and do not
 | Event | Implemented behavior |
 |---|---|
 | `SessionStart` | Resolve/bind a real session and worktree; inject a short restore instruction, never raw tool output as privileged instructions |
+| `PreToolUse` (Bash) | In enforce mode, put a command that changes the operator's contract to the operator (`permissionDecision: "ask"`, which still prompts under bypassed permissions); other commands pass without state access |
 | `Stop` | Recompute root acceptance; in enforce mode block unfinished executable work, with semantic no-progress protection |
 | `TaskCompleted` | For an explicitly mapped native task, return exit 2 with stderr when its mapped work lacks current evidence |
-| `PostToolUse` | Record a bounded tool-name event for configured tools; no raw payload or secret-bearing output log. Waits at most 1 s for the task lock, then drops the event; like every hook it never exits nonzero |
-| `PostToolUseFailure` | Record the failure event without manufacturing acceptance |
+| `PostToolUse` | Append one tool-name line to `activity.jsonl` (no lock, no fsync, no rewrite of `task.json`; no raw payload or secret-bearing output), and, after an asked command, record the operator's approval of the decisions it logged |
+| `PostToolUseFailure` | The same, for a failed tool call; never manufactures acceptance |
 
 A session binding takes precedence over the current worktree pointer. It keeps governing while the session's cwd belongs to the task: inside the task root or a check's candidate tree, or in another worktree of the same repository that has no active task of its own. When the cwd is an unrelated project or a sibling worktree holding its own assignment, the binding is released with a message naming both roots and the session is bound to that checkout's active task, if any. `init --new` moves the worktree's session bindings to the new assignment, so the session is never left on a paused task that nothing enforces. A binding whose task directory was deleted is dropped. A cwd that is unusable (gone, a file, Git discovery failing) keeps the binding and prints a message on SessionStart and Stop naming the task root to return to.
 
@@ -65,4 +66,6 @@ Implementation references: Claude Code skills and hooks documentation, retrieved
 - https://code.claude.com/docs/en/skills
 - https://code.claude.com/docs/en/hooks
 
-Payload fixtures and emitted control responses are tested locally. Live host integration and the user's installed version were not tested in this build.
+- https://code.claude.com/docs/en/permission-modes and https://code.claude.com/docs/en/permissions (an `ask` decision still prompts under `bypassPermissions`)
+
+Payload fixtures and emitted control responses are tested locally. Claude Code 2.1.280 was exercised live in headless mode (`evidence/live-host.log`): SessionStart context, a blocking Stop, the watchdog release, observe mode, and the operator-confirmation prompt (denied with no prompt host, approved through a permission-prompt tool). An interactive session was not driven.

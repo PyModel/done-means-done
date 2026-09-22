@@ -42,6 +42,8 @@ Finish or checkpoint active checks and obtain a clean handoff before changing ru
 
 Move the old installation to an operator-chosen backup outside all skill discovery directories, then copy the new complete directory into the original target path. Do not destroy old task records. Validate the new package and inspect hook previews before application. Avoid activating duplicate skill copies from user/project/shared discovery locations.
 
+For an install in place (a Git checkout the settings already point at), updating the files is not enough when a release adds a hook event: rerun `hooks/install.py --apply` so the new registration (0.7.0 adds PreToolUse, which puts operator decisions to the operator) is added and recorded in the manifest. Until then no confirmation channel exists and decisions are reported as unconfirmed.
+
 ## Schema-1 import
 
 This release uses schema 2 under a separate `v2/` namespace. It does not silently interpret or overwrite older records. Locate the actual old `task.json`; use its concrete path rather than guessing an ID.
@@ -52,7 +54,7 @@ dmd --cwd /absolute/project migrate \
   --authority "Operator approved migration of this assignment"
 ```
 
-If the destination worktree already has a separate unfinished task, the import refuses to supersede it unless the operator explicitly uses `--new`. A valid replacement preserves that old assignment as paused. Invalid legacy graphs are rejected before replacing the active task or pausing its work.
+If the destination worktree already has a separate unfinished task, the import refuses to supersede it unless the operator explicitly uses `--new`. Importing a record that was already imported (the same file content) also needs `--new`. A legacy check method this release does not know becomes a command check to reauthor, with the original kept as `legacy_method`. A valid replacement preserves that old assignment as paused. Invalid legacy graphs are rejected before replacing the active task or pausing its work.
 
 Import retains the original file unchanged and archives a redacted snapshot. Requirements/work/checks/findings are copied as obligations, not assumed achievements. Historical PASS records do not satisfy current checks; every check starts NOT_RUN and needs reauthoring. Confirmed findings reopen even if previously labeled reported, minor, or out of scope. Old paused/cancelled execution states stay suspended.
 

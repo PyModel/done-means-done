@@ -16,6 +16,45 @@ A command whose text contains its own `--match` token (`npm test && echo OK`, `p
 
 Renamed: the `summary.checks.unapproved` bucket is `edited`, which is what it always held. A work item's reason reads `W-01: checks owed: A-01` in place of the status-based wording.
 
+Operator decisions. `--authority` is text the agent types, and five commands used it as a one-step exit. With the hooks enforcing, a new PreToolUse hook asks the operator through the host's permission prompt before a Bash command changes their contract. That covers:
+- `req cancel` and `attest-only`;
+- `finding defer`;
+- `state`;
+- `review --kind independent`;
+- `init`/`migrate --new` over an unfinished task;
+- `config`;
+- `relocate`;
+- running a hook by hand;
+- removing the hooks.
+
+The prompt still appears under bypassed permissions. The CLI logs each decision as `AU-XX`, and PostToolUse records the approval. Until then:
+- the gate owes the decision;
+- an unconfirmed pause does not suspend enforcement;
+- an unconfirmed config change leaves the hooks as they were.
+
+`dmd authority list|confirm|withdraw` asks again or undoes a decision. Without the hooks, decisions apply and every report says they were never confirmed. See ADR 0003. `install.py --apply` must be rerun to register PreToolUse.
+
+Request items. New tasks record the request's explicit list items (`C-XX`; fenced code is skipped, and amendments add more). Coverage is refused while an item has neither a requirement (`req add --covers`, `coverage map`) nor a context note (`coverage context`, which takes several IDs), so an enumerated outcome cannot be dropped silently. Older tasks keep their contract digest.
+
+Outputs and disproofs. `check add|edit --writes GLOB` leaves a check's own untracked outputs (junit.xml, coverage files) out of its candidate's fingerprint and out of the writer preflight. A check that writes a report no longer stales itself or its siblings. Tracked files and whole-type globs are refused, and fingerprints are unchanged when nothing is declared. A disproof is now bound to the files it examined, the `--location` file plus `finding set --input`, so an edit elsewhere no longer reopens it.
+
+Store and speed. The task store (location, loading, the edit transaction, creation, session binding, hook config) moved out of `cli.py` into `store.py`, and rendering into `report.py`. Hooks and migration no longer import the CLI (ADR 0002). PostToolUse appends one unsynced line to `activity.jsonl` instead of rewriting and fsyncing `task.json` on every tool call. A bound session inside its task root skips Git discovery, hook calls skip building the full parser, and bytecode is cached under the user cache home, never in the skill directory. The preflight reads a machine-wide index of live runs instead of every task record. Measured with hyperfine over 40 runs: PostToolUse went from 92.7 to 42.0 ms and Stop from 119.9 to 77.4 ms.
+
+Agent experience. Every `dmd next` action now names the complete command, including required flags such as `coverage assert --note` and `review --kind/--reviewer/--note/--evidence`. A live host run showed an agent following the old wording into usage errors. The headline counts unmapped request items, unasserted coverage, requirements without a check, and decisions awaiting the operator.
+
+Cleanup:
+- `--request-file -` and `--evidence -` read standard input, so the protocol needs no scratch files.
+- The report's *Possible leftovers* section lists untracked files that no check declared, and checks that left background processes.
+- `gc` prunes confirmation tickets left by denied prompts and orphaned run-index entries.
+- SKILL.md's Close step has a checkable "leave no leftovers" criterion.
+
+Migration:
+- An unknown legacy check method is imported for reauthoring (`legacy_method`) instead of rejecting the import.
+- Importing the same record twice needs `--new`.
+
+Fixed:
+- The check supervisor aborted with SIGABRT, which produced macOS crash reports, when its status pipe had closed: the parent was interrupted, had hit the output limit, or had died. The status write raised EPIPE, and the interpreter shut down while the stdin watcher thread held the buffered reader's lock. The watcher now reads the raw descriptor, EPIPE is tolerated, and the supervisor never finalizes the interpreter.
+
 ## 0.6.0 — 2026-09-13
 
 Resilience and isolation. One incident and four read-only audits.

@@ -15,7 +15,7 @@ Strict on outcomes, free on method. The operator's request becomes a **ledger** 
 
 The gate returns `COMPLETE` only when all of these hold. The Stop hook keeps your turn open until they do.
 
-1. **Every requested outcome is recorded.** Each independently omittable outcome or acceptance-changing constraint in the request and its amendments has its own requirement (`R-*`). Five outcomes means five requirements. Coverage has been asserted against the current request.
+1. **Every requested outcome is recorded.** Each independently omittable outcome or acceptance-changing constraint in the request and its amendments has its own requirement (`R-*`). Five outcomes means five requirements. Every item the operator listed (`C-*`) is covered by a requirement or marked context, and coverage has been asserted against the current request.
 2. **Every requirement is proven now.** Each one has at least one accepted check (`A-*`) against the current tree. Command checks are executed. Attestation alone carries a requirement only with operator authority.
 3. **Every confirmed defect is resolved.** Any defect you discover in the authorized project (introduced, pre-existing, minor, or in a dependency) is a finding (`F-*`). It ends fixed with red-then-green regression proof, disproved by evidence, a duplicate, or deferred by the operator.
 4. **Nothing is left hanging.** Every planned work item (`W-*`) has accepted evidence or was superseded with a reason. No blocker, unknown external outcome, or interrupted run is open.
@@ -31,7 +31,7 @@ Evidence goes stale when the tree it tested changes. Yesterday's green proves no
 - **Status.** A work item's `--status` is your progress note. Evidence is what the gate reads.
 - **Supersede your own records.** A work item or check you added in error is retired with `work remove` / `check remove --note`. It stays visible in the report.
 
-Only the operator changes the contract. Authority flags (`req cancel`, `req attest-only`, `finding defer`, `review --kind independent`, `state PAUSED|CANCELLED`) record the operator's own words. Record them when the operator actually said so, quoting them.
+Only the operator changes the contract. Authority flags (`req cancel`, `req attest-only`, `finding defer`, `review --kind independent`, `state`, `init --new`, `config`) record the operator's own words; use them only when the operator said so, quoting them. With the hooks enforcing, the host asks the operator to approve each one, and an unapproved decision leaves the gate owing `AU-*` until they confirm it or you withdraw it ([commands](references/commands.md#operator-decisions)).
 
 ## Runtime
 
@@ -43,17 +43,20 @@ Only the operator changes the contract. Authority flags (`req cancel`, `req atte
 
 ### 1. Record
 
-Read-only discovery (repository instructions, real commands, boundaries) may come first. Before the first edit, save the request (without credentials) to a file outside the project, then:
+Read-only discovery (repository instructions, real commands, boundaries) may come first. Before the first edit, record the request (without credentials) from standard input, so no scratch file is left behind:
 
 ```bash
-dmd init --request-file /abs/request.txt --authority "Operator invoked done-means-done" --session "${CLAUDE_SESSION_ID}"
-dmd req add "Export endpoint returns CSV for every report type" --anchor "request: 'add CSV export for all reports'"
+dmd init --request-file - --authority "Operator invoked done-means-done" --session "${CLAUDE_SESSION_ID}" <<'REQUEST'
+<the operator's request, verbatim>
+REQUEST
+dmd coverage items        # the request's list items, C-01...
+dmd req add "Export endpoint returns CSV for every report type" --anchor "request: 'add CSV export for all reports'" --covers C-01
 dmd coverage assert --note "3 outcomes and 1 constraint in the request map to R-01..R-04"
 ```
 
 Include what the outcome makes necessary: callers, migrations, config, docs, deployment verification, rollback. Optional suggestions are not requirements.
 
-**Done when:** rereading the original request finds no outcome without a requirement, and coverage is asserted.
+**Done when:** rereading the original request finds no outcome without a requirement, every listed item is covered or marked context (`coverage map` / `coverage context`), and coverage is asserted.
 
 ### 2. Prove
 
@@ -65,13 +68,13 @@ dmd check add --req R-01 --cmd "python3 -B tests/verify_export.py" \
   --match "EXPORT_OK" --input tests/verify_export.py --approve "read the verifier: 4 assertions, token last"
 ```
 
-The token has to come from real assertions; `dmd` refuses a token that appears in the command text itself (`tests && echo OK`). Non-code deliverables still get executed checks: a script that confirms every requested section of a report exists, every cited source resolves, a dataset's row counts and invariants hold, a deployed endpoint answers. Use attestation (`--method manual|review|browser --attested-because ...`) only when nothing can observe the behavior from a command. See [verification](references/verification.md).
+The token has to come from real assertions; `dmd` refuses a token that appears in the command text itself (`tests && echo OK`). A check that writes a report into the tree declares it (`--writes reports/junit.xml`) so its own output does not make it stale. Non-code deliverables still get executed checks: a script that confirms every requested section of a report exists, every cited source resolves, a dataset's row counts and invariants hold, a deployed endpoint answers. Use attestation (`--method manual|review|browser --attested-because ...`) only when nothing can observe the behavior from a command. See [verification](references/verification.md).
 
 **Done when:** every requirement has a check that would fail if its outcome were missing.
 
 ### 3. Execute
 
-Repeat until `dmd next` names nothing but the final review. Implement a coherent slice, then `dmd run A-01 A-02` (or `dmd run --all`), then `dmd next`. Every gate reason names its cause and the command that clears it. Read the `summary.headline` first.
+Repeat until `dmd next` names nothing but the final review. Implement a coherent slice, then `dmd run A-01 A-02` (or `dmd run --all`), then `dmd next`. Every gate reason names its cause and every `next` action the full command that clears it. Read the `summary.headline` first.
 
 After two materially equivalent failures, record `dmd attempt <ID> "<failure>" --strategy "<different approach>"` and change the hypothesis: isolate a reproducer, read the primary contract, instrument the failing path. A leaf finishing, a phase ending, a green build, or context compaction is not the assignment finishing.
 
@@ -96,18 +99,20 @@ Order findings by severity; every one gets resolved. Keep the operator's uncommi
 
 ### 5. Close
 
-Reread the original request. Inspect the actual final diff and the integrated candidate, not isolated pieces. Rerun checks after the final integration. Then:
+Reread the original request. Inspect the actual final diff and the integrated candidate, not isolated pieces. Leave the workspace as you would hand it over: stop every process you started (dev servers, watchers, containers), remove scratch files, temporary directories, experiment branches and worktrees you created. Every untracked file left (the report's *Possible leftovers* lists them) is a deliverable you name in the report; remove the rest. Rerun checks after the final integration and cleanup. Then:
 
 ```bash
 dmd coverage assert --note "final reconciliation against the original request"
-dmd review --kind self --reviewer "<who actually reviewed>" --note "<what was reviewed>" --evidence /abs/review.txt
+dmd review --kind self --reviewer "<who actually reviewed>" --note "<what was reviewed>" --evidence - <<'REVIEW'
+<what you compared: request, diff, integrated result, findings>
+REVIEW
 dmd gate
 dmd report --save
 ```
 
 A second pass by the same agent is `self`; if the operator required independent review (`init --independent-review`), only a genuinely separate reviewer satisfies it. Report every requirement and finding, how many checks were executed versus attested, and real limitations. Link the saved report rather than flooding the operator with logs.
 
-**Done when:** `dmd gate` returns `COMPLETE` and the report is saved.
+**Done when:** `dmd gate` returns `COMPLETE`, the report is saved, nothing you started is still running, and *Possible leftovers* lists only deliverables.
 
 ## When you cannot proceed
 
