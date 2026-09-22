@@ -128,7 +128,7 @@ Trigger: the remaining items of the same review (operator authority, check outpu
 | NoLeftovers: request text and review evidence come from standard input (no scratch file); the report lists untracked files that are not declared outputs; `gc` prunes expired approval tickets; the run index drops a run its task no longer records | All pass |
 | Supervisor crash (SIGABRT in `_enter_buffered_busy`, from the reports): a supervisor whose parent stopped listening holds without aborting, and one orphaned by its parent exits with no `Fatal Python error` (red on the previous code) | All pass |
 | Migration: an unknown legacy check method imports as `manual` needing review; a repeat import of the same file is refused without `--new` | All pass |
-| Hook latency (hyperfine, 40 runs) | PostToolUse 92.7 to 42.0 ms; Stop 119.9 to 77.4 ms |
+| Hook latency (hyperfine, 40 runs) | PostToolUse 92.7 to 42.0 ms; Stop 119.9 to 77.4 ms. The new PreToolUse hook runs on every Bash call: 50 ms in observe mode, 46 ms in enforce mode for a command that is not a decision (a bare `python3 -c pass` takes 22 ms) |
 | Real state: 28 recorded tasks gated read-only by 0.6.0 and this code | Identical distribution (22 ACTIVE, 4 PAUSED, 1 BLOCKED on a missing root, 1 COMPLETE); 0 contract-digest differences |
 | Full suite, macOS Python 3.14.7 and 3.10; Linux Docker `python:3.10` | `DMD_TESTS_PASS:338;skipped=0` on each, [transcript](tests-final.log) |
 
