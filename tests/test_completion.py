@@ -342,8 +342,7 @@ class RequestItemsAreAccounted(test_runtime.DmdFixture):
     def test_map_links_an_existing_requirement(self):
         self.init(self.REQUEST)
         self.cmd("req", "add", "all exports", "--anchor", "request", "--covers", "C-01", "--covers", "C-02")
-        for item in ("C-03", "C-04", "C-05"):
-            self.cmd("coverage", "map", item, "--req", "R-01")
+        self.cmd("coverage", "map", "C-03", "C-04", "C-05", "--req", "R-01")
         self.cmd("coverage", "assert", "--note", "one requirement covers all")
         _, err = self.cmd("req", "add", "x", "--anchor", "a", "--covers", "C-99", code=2)
         self.assertIn("unknown request item", err)
@@ -504,3 +503,30 @@ class OperatorDecisions(test_runtime.DmdFixture):
         g = self.gate()
         self.assertNotIn("AU-01", json.dumps(g["reasons"]))
         self.assertEqual(g["summary"]["authority_unverified"], ["AU-01"])
+
+
+
+class NoLeftovers(test_runtime.DmdFixture):
+    """The skill itself leaves no scratch files, and the report names what a job left."""
+    def test_request_and_review_evidence_come_from_standard_input(self):
+        self.cmd("init", "--request-file", "-", "--authority", "operator", stdin="Fix the parser.\n")
+        self.assertEqual(load_task(locate(self.repo))["original_request"], "Fix the parser.")
+
+    def test_report_lists_untracked_files_in_a_git_root(self):
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.setup_task(); (self.repo / "scratch-notes.txt").write_text("tmp")
+        out, _ = self.cmd("report", "--only", "leftovers")
+        self.assertIn("untracked: scratch-notes.txt", out)
+
+    def test_gc_prunes_stale_confirmation_tickets(self):
+        import os, time
+        self.setup_task()
+        pending = self.state / "pending"; pending.mkdir(mode=0o700)
+        old, fresh = pending / "old.json", pending / "fresh.json"
+        for p in (old, fresh):
+            p.write_text("{}")
+        os.utime(old, (time.time() - 2 * 86400,) * 2)
+        out, _ = self.cmd("gc")
+        self.assertEqual(json.loads(out)["stale_confirmation_tickets_removed"], 1)
+        self.assertTrue(fresh.exists()); self.assertFalse(old.exists())

@@ -1,9 +1,11 @@
 """The human-readable report: named sections rendered from a task and its gate."""
 from __future__ import annotations
-from .model import acceptance_reason, attested, check_candidate, legacy_receipt, repeated_attempts
+from pathlib import Path
+from .model import acceptance_reason, attested, candidate_outputs, check_candidate, legacy_receipt, live, repeated_attempts
+from .source import output_match, untracked
 
 
-SECTIONS = ("assignment", "acceptance", "requirements", "work", "checks", "findings", "blockers", "decisions", "attempts", "reviews", "owed", "next", "footer")
+SECTIONS = ("assignment", "acceptance", "requirements", "work", "checks", "findings", "blockers", "decisions", "attempts", "reviews", "leftovers", "owed", "next", "footer")
 
 def sections(directory, t, g):
     """The report as named sections, so a reader can ask for one instead of the dump."""
@@ -92,6 +94,7 @@ def sections(directory, t, g):
     if log:
         out["reviews"] = ["## Review history"] + [
             f"- {entry['at']} [{entry['outcome']}] {entry['kind']} review by {entry['reviewer']}: {entry['note']}" for entry in log]
+    out["leftovers"] = leftovers(t)
     out["owed"] = ["## Still owed"] + ["- " + x for x in g["reasons"]]
     out["next"] = ["## Next actions"] + [f"- {x['id']}: {x['action']}" for x in g["next"]]
     source = g.get("source")
@@ -102,6 +105,24 @@ def sections(directory, t, g):
     out["footer"] = ["Review: " + ((t.get("review") or {}).get("kind", "not recorded")), *source_lines,
                      "Evidence is local auditability, not tamper-proof attestation."]
     return out
+
+
+def leftovers(t, limit=20):
+    """What a finished job may have left behind: untracked files in the task root that no
+    check declared as its output, and checks whose command left processes running. Commit
+    what is a deliverable; remove the rest."""
+    root = t["root"]
+    outputs = candidate_outputs(t).get(root, [])
+    loose = sorted(p for p in (untracked(root) or set()) if not output_match(p, outputs)) if Path(root).is_dir() else []
+    holders = [c["id"] for c in live(t["checks"]) if (c.get("receipt") or {}).get("background_holders")]
+    if not loose and not holders:
+        return []
+    lines = ["## Possible leftovers (commit deliverables, remove the rest)"]
+    lines += [f"- untracked: {p}" for p in loose[:limit]]
+    if len(loose) > limit:
+        lines.append(f"- ... and {len(loose) - limit} more untracked files")
+    lines += [f"- {cid}: its command left background processes running; stop them" for cid in holders]
+    return lines
 
 
 def render(directory, t, g, only=None):

@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import socket
+import time
 import uuid
 from pathlib import Path
 from . import __version__
@@ -346,6 +347,34 @@ def unindex_run(token):
     if token:
         with contextlib.suppress(OSError, DmdError):
             (runs_dir() / (ident(token) + ".json")).unlink()
+
+def prune_run_index():
+    """Drop index entries whose task no longer records that run. Returns how many."""
+    removed = 0
+    for entry in sorted(runs_dir().glob("*.json")):
+        try:
+            ref = read_json(entry)
+            running = read_json(Path(ref["task_dir"]) / "task.json").get("running") or {}
+            live = running.get("token") == ref.get("token")
+        except (DmdError, OSError, KeyError, TypeError, AttributeError):
+            live = False
+        if not live:
+            with contextlib.suppress(OSError):
+                entry.unlink(); removed += 1
+    return removed
+
+# A confirmation ticket outlives its tool call only when the operator denied the prompt
+# (no PostToolUse consumes it). A day is far longer than any prompt waits for an answer.
+TICKET_TTL_SECONDS = 86400
+
+def prune_tickets(max_age=TICKET_TTL_SECONDS):
+    removed = 0
+    directory = state_root() / "pending"
+    for ticket in sorted(directory.glob("*.json")) if directory.is_dir() else []:
+        with contextlib.suppress(OSError):
+            if time.time() - ticket.stat().st_mtime > max_age:
+                ticket.unlink(); removed += 1
+    return removed
 
 def other_runs(task_id, candidates):
     """Runs recorded by other tasks on this machine that touch one of our candidates. A

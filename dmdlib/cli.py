@@ -21,7 +21,7 @@ from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, accept
                     source_for, task_fingerprint, task_snapshot, work_ok)
 from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
 from .store import (StateInsideProject, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
-                    DEFAULT_CONFIG, authority_channel, index_run, pid_alive, prune_sessions, remember_session, unindex_run, withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
+                    DEFAULT_CONFIG, authority_channel, prune_run_index, prune_tickets, index_run, pid_alive, prune_sessions, remember_session, unindex_run, withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
 from .authority import effective, find, record, terminal_confirms, withdraw as authority_withdraw
 
@@ -78,7 +78,13 @@ def artifact_from_file(directory, path):
 
 
 def read_operator_file(path, name):
-    """Operator-supplied files get one set of guards, wherever they enter the runtime."""
+    """Operator-supplied files get one set of guards, wherever they enter the runtime.
+    `-` reads standard input, so a request or review note never needs a scratch file."""
+    if path == "-":
+        text = sys.stdin.read(1048577)
+        if not text.strip() or len(text.encode()) > 1048576:
+            raise DmdError(f"{name} from standard input must be non-empty and at most 1 MiB")
+        return text
     p = Path(path).expanduser()
     if p.is_symlink() or not p.is_file():
         raise DmdError(f"{name} must be an existing regular file, not a symlink: {p}")
@@ -783,14 +789,18 @@ def coverage(args):
             print(f"{c['id']} [{state}] {c['text']}")
     elif args.action in ("map", "context"):
         with edit(args, "coverage." + args.action) as (_, t):
-            clause = get(t.get("clauses") or [], require_text(args.item, "request item ID (C-XX)"))
+            if not args.item:
+                raise DmdError("name at least one request item ID (C-XX); dmd coverage items lists them")
+            clauses = [get(t.get("clauses") or [], cid) for cid in args.item]
             if args.action == "map":
-                r = get(t["requirements"], require_text(args.req, "--req naming the requirement that covers it"))
-                r["covers"] = sorted(set(r.get("covers") or []) | {clause["id"]})
+                r = get(t["requirements"], require_text(args.req, "--req naming the requirement that covers them"))
+                r["covers"] = sorted(set(r.get("covers") or []) | {c["id"] for c in clauses})
+            note = None if args.action == "map" else require_text(args.note, "--note saying why these items are context, not outcomes")
+            for clause in clauses:
                 clause.pop("context", None)
-            else:
-                clause["context"] = require_text(args.note, "--note saying why this item is context, not an outcome")
-            print(clause["id"] + (" -> " + args.req if args.action == "map" else " marked context"))
+                if note:
+                    clause["context"] = note
+            print(", ".join(c["id"] for c in clauses) + (" -> " + args.req if args.action == "map" else " marked context"))
     else:
         with edit(args, "coverage.assert") as (_, t):
             if not t["requirements"]:
@@ -1043,11 +1053,14 @@ def gc(args):
     """Remove dead session bindings and list finished task records. Task directories are
     never deleted here: evidence is the audit trail, and removal is the operator's call."""
     removed = prune_sessions()
+    tickets = prune_tickets()
+    runs = prune_run_index()
     finished = []
     for directory, t in task_records():
         if isinstance(t, dict) and t["state"] in ("COMPLETE", "CANCELLED"):
             finished.append({"task_id": t["task_id"], "state": t["state"], "root": t["root"], "path": str(directory)})
-    print(json.dumps({"session_bindings_removed": removed, "finished_tasks": finished,
+    print(json.dumps({"session_bindings_removed": removed, "stale_confirmation_tickets_removed": tickets,
+                      "orphaned_run_index_entries_removed": runs, "finished_tasks": finished,
                       "note": "finished task directories are listed, not deleted; remove them explicitly if their evidence is no longer needed"}, indent=2))
     return 0
 
@@ -1196,7 +1209,7 @@ def parser():
     s = command("blocker", blocker); s.add_argument("action", choices=["add", "clear", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--json", action="store_true")
     for flag in ["id", "item", "owner", "unblock", "proof"]: s.add_argument("--" + flag)
     s = command("uncertain", uncertain); s.add_argument("action", choices=["add", "resolve", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--proof"); s.add_argument("--json", action="store_true")
-    s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert", "items", "map", "context"]); s.add_argument("item", nargs="?"); s.add_argument("--req"); s.add_argument("--note")
+    s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert", "items", "map", "context"]); s.add_argument("item", nargs="*"); s.add_argument("--req"); s.add_argument("--note")
     s = command("review", review); s.add_argument("--kind", choices=["self", "independent"], required=True); s.add_argument("--reviewer", required=True); s.add_argument("--note", required=True); s.add_argument("--evidence", required=True)
     for name in ["status", "next", "gate", "report", "handoff", "reconcile"]:
         s = command(name, inspect_task); s.add_argument("--json", action="store_true"); s.add_argument("--save", action="store_true"); s.add_argument("--only", action="append", choices=SECTIONS, help="render one report section")
