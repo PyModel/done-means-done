@@ -70,8 +70,34 @@ def source_for(fps, c):
             return fps[str(parent)]
     return None
 
+# An explicit list item in the request: "- x", "* x", "1. x", "2) x", "a) x".
+LIST_ITEM = re.compile(r"^\s{0,8}(?:[-*+\u2022]|\d{1,3}[.)]|[a-z]\))\s+(\S.*)$")
+MAX_CLAUSES = 100
+
+def extract_clauses(text, first=1, source="request"):
+    """The explicit list items of a request or amendment, each a candidate outcome the
+    operator enumerated. Fenced code is skipped; prose is not segmented."""
+    found, fenced = [], False
+    for line in str(text).splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        m = None if fenced else LIST_ITEM.match(line)
+        if m and len(found) < MAX_CLAUSES:
+            found.append({"id": f"C-{first + len(found):02d}", "text": m.group(1).strip()[:300], "source": source})
+    return found
+
+def unmapped_clauses(t):
+    """Request list items with no requirement covering them and no context note."""
+    covered = {cid for r in t["requirements"] for cid in r.get("covers") or []}
+    return [c for c in t.get("clauses") or [] if c["id"] not in covered and not str(c.get("context") or "").strip()]
+
 def contract(task):
-    return {
+    extra = {}
+    if "clauses" in task:
+        # Present only on tasks created since 0.7.0, so older contracts keep their digest.
+        extra["clauses"] = [{k: c.get(k) for k in ("id", "text", "context")} for c in task["clauses"]]
+    return {**extra,
         "request": task["original_request"], "amendments": task["amendments"],
         "requirements": task["requirements"],
         "work": [{k: w.get(k) for k in ("id", "req", "text", "deps", "owns", "removed")} for w in task["work"]],
@@ -227,6 +253,16 @@ def validation_errors(t):
             errors.append(f"{f['id']}: missing canonical finding")
         if any(x not in works for x in f.get("work", [])) or any(x not in checks for x in f.get("checks", [])):
             errors.append(f"{f['id']}: missing remediation work or check")
+    clauses = t.get("clauses", [])
+    if not isinstance(clauses, list) or any(not isinstance(c, dict) or not re.fullmatch(r"C-\d{2,}", str(c.get("id", "")))
+                                            or not str(c.get("text", "")).strip() for c in clauses):
+        errors.append("invalid request list items")
+    else:
+        clause_ids = {c["id"] for c in clauses}
+        for r in t["requirements"]:
+            covers = r.get("covers", [])
+            if not isinstance(covers, list) or any(x not in clause_ids for x in covers):
+                errors.append(f"{r['id']}: covers an unknown request item")
     all_ids = reqs | works | checks | findings | {"task"}
     for b in t["blockers"]:
         if b.get("item") not in all_ids or not all(str(b.get(x, "")).strip() for x in ("text", "owner", "unblock", "proof")):
@@ -491,7 +527,11 @@ class Assessment:
     def _collect(self):
         t = self.t
         cov = t.get("coverage") or {}
-        if cov.get("digest") != contract_digest(t):
+        loose = unmapped_clauses(t)
+        if loose:
+            named = "; ".join(f"{c['id']} {c['text'][:60]!r}" for c in loose[:5]) + (f" (+{len(loose) - 5} more)" if len(loose) > 5 else "")
+            self._add("coverage", f"coverage: request items with no requirement: {named}")
+        elif cov.get("digest") != contract_digest(t):
             self._add("coverage", "coverage: reconcile the original request and current obligation inventory")
         if not self.active:
             self._add("task", "no active requirements; an empty ledger cannot complete")
@@ -564,39 +604,84 @@ class Assessment:
         result = []
         for owner in owners:
             if owner == "coverage":
-                action = "reconcile the original request with the inventory, then dmd coverage assert"
+                loose = unmapped_clauses(t)
+                if loose:
+                    first = loose[0]["id"]
+                    action = (f"account for request items {', '.join(c['id'] for c in loose)}: dmd req add '<outcome>' --anchor "
+                              f"'<quote>' --covers {first}, or dmd coverage map {first} --req R-XX, or dmd coverage context "
+                              f"{first} --note '<why it is not an outcome>' (dmd coverage items lists them)")
+                else:
+                    action = ("reread the original request against dmd coverage show, then "
+                              "dmd coverage assert --note '<which request outcomes map to which R-XX>'")
             elif owner == "task":
-                action = "record the requested outcomes with dmd req add"
+                action = "record each requested outcome: dmd req add '<outcome>' --anchor '<quote from the request>'"
             elif owner == "running":
-                action = "inspect the interrupted run, then dmd recover-run --proof ..."
+                action = "inspect the interrupted run's effects, then dmd recover-run --proof '<what you verified>'"
             elif owner.startswith("U-"):
-                action = "reconcile external outcome before retry"
+                action = f"verify what actually happened before any retry, then dmd uncertain resolve --id {owner} --proof '<evidence>'"
             elif owner.startswith("R-"):
                 reqtext = " ".join(text for o, text in self.reasons if o == owner)
-                action = ("add an acceptance check" if "missing acceptance check" in reqtext
-                          else "add an executed acceptance check, or record operator authority via req attest-only")
+                add = (f"dmd check add --req {owner} --cmd '<verifier>' --expect '<behavior>' --match '<token printed after "
+                       "its assertions>' --approve '<what you inspected>'")
+                action = (add if "missing acceptance check" in reqtext
+                          else f"add an executed check ({add}), or record the operator's words: "
+                               f"dmd req attest-only --id {owner} --authority '<quote>'")
             elif owner.startswith("F-"):
-                action = "investigate/remediate and verify: " + self.findings.get(owner, "")
+                action = self.finding_action(owner)
             elif owner.startswith("W-"):
                 w = get(t["work"], owner)
                 if any(not self.work_ok(d) for d in w["deps"]):
                     continue  # not dependency-ready; its prerequisite carries the action
                 owed = self.work_owed(owner)
-                if w["status"] != "verified":
-                    action = "implement/verify" + (f" (checks owed: {', '.join(owed)})" if owed else " (map an acceptance check)")
+                if owed and w["status"] == "verified":
+                    action = f"rerun stale evidence: dmd run {' '.join(owed)}"
+                elif owed:
+                    action = f"implement {owner}, then dmd run {' '.join(owed)}"
                 else:
-                    action = "rerun stale evidence: " + (", ".join(owed) or "no mapped check")
+                    action = (f"map a check: dmd check add --req {w['req']} --work {owner} ..., "
+                              f"or dmd work remove --id {owner} --note '<why it is superseded>'")
             elif owner.startswith("A-"):
                 c = get(t["checks"], owner)
                 if self.verdicts[owner][0] is not None and any(w in actionable_owners for w in c["work"]):
                     continue  # the mapped work item already names this check
-                action = "; ".join(text.split(": ", 1)[1] for o, text in self.reasons if o == owner)
+                action = self.check_action(c)
             else:
                 continue
             if repeated_attempts(attempts.get(owner, [])):
                 action += "; equivalent attempts already failed here — change diagnostic strategy before retrying"
             result.append({"id": owner, "action": action})
         return result
+
+    def check_action(self, c):
+        cid = c["id"]
+        code, reason = self.verdicts[cid]
+        if code in ("not_run", "stale"):
+            action = f"dmd run {cid}"
+        elif code == "failed":
+            action = f"fix the cause ({reason.split(';')[0]}), then dmd run {cid}"
+        elif code == "edited":
+            action = f"inspect it (dmd preview {cid}), then dmd approve {cid} --note '<what you inspected>' and dmd run {cid}"
+        elif code is not None:
+            action = reason
+        else:
+            action = ""
+        if c.get("regression") and not self.red.get(cid):
+            red = (f"record the red baseline against the faulty code: dmd run {cid} --red (or, when that code is gone, "
+                   f"dmd check baseline --id {cid} --note '<why>' --evidence <file>)")
+            action = f"{action}; {red}" if action else red
+        return action
+
+    def finding_action(self, fid):
+        f = get(self.t["findings"], fid)
+        reason = self.findings.get(fid, "")
+        if f["status"] == "suspected":
+            return (f"investigate, then dmd finding set --id {fid} --status confirmed (with the evidence), or --status disproved "
+                    f"--note '<what shows the invariant holds>' --evidence <file>")
+        if f["status"] in ("confirmed", "fixed-unverified"):
+            return (f"fix it with a regression check: dmd check add --req R-XX --cmd '<test>' --expect '<invariant>' --match '<pass token>' "
+                    f"--regression --red-match '<failure token>' --approve '<inspected>'; dmd run A-XX --red; fix the root cause; "
+                    f"dmd run A-XX; dmd finding set --id {fid} --status fixed-verified --check A-XX --note '<root cause fixed>'")
+        return f"resolve {fid}: {reason}"
 
     def status(self, reasons):
         if not reasons:
@@ -621,6 +706,14 @@ class Assessment:
         open_blockers = [b["id"] for b in t["blockers"] if not b.get("resolved")]
         deferred = [f["id"] for f in t["findings"] if f["status"] == "deferred"]
         parts = []
+        loose = unmapped_clauses(t)
+        if loose:
+            parts.append(f"{len(loose)} request item(s) unmapped")
+        elif (t.get("coverage") or {}).get("digest") != contract_digest(t):
+            parts.append("coverage not asserted")
+        uncovered = [rid for rid in self.active if not any(c["req"] == rid for c in live(t["checks"]))]
+        if uncovered:
+            parts.append(f"{len(uncovered)} requirement(s) without a check")
         for key, label in (("stale", "stale"), ("failed", "failed"), ("not_run", "not run"), ("edited", "edited, need approval"),
                            ("missing_inputs", "declare a missing input"), ("other", "lack evidence")):
             if groups[key]:
@@ -686,7 +779,8 @@ def evaluate(task_dir, t, fp=None, require_review=True):
         reasons.append(review)
     nxt = a.next_actions()
     if review and not a.reasons:
-        nxt.append({"id": "review", "action": "final review of the request, diff and integrated result: dmd review ..."})
+        nxt.append({"id": "review", "action": "review the request, the final diff and the integrated result, then dmd review --kind self "
+                    "--reviewer '<who reviewed>' --note '<what was reviewed>' --evidence /abs/review.txt"})
     status = "COMPLETE" if not reasons else ("ACTIVE" if nxt else a.status(reasons))
     if status == "ACTIVE" and not nxt:
         # Open reasons with no dependency-ready item mean the plan itself is stuck (a cycle

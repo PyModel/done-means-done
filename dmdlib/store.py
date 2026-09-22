@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, ident, lock, now, private_dir, read_json, redact, save
 from .source import git_root, identity
-from .model import SCHEMA, contract_digest, validation_errors
+from .model import SCHEMA, contract_digest, extract_clauses, validation_errors
 
 
 def state_root():
@@ -238,6 +238,8 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
          "checks": [], "findings": [], "blockers": [], "uncertain": [], "events": [], "sessions": [],
          "approvals": {}, "coverage": None, "review": None, "running": None, "attempts": {},
          "require_independent_review": require_review, "host_map": {}}
+    # The request's explicit list items: each must map to a requirement or be marked context.
+    t["clauses"] = extract_clauses(t["original_request"])
     if session:
         t["sessions"].append(digest(session))
     if prepare is not None:

@@ -16,7 +16,7 @@ from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
 from .source import candidate_root, drift, file_digest, git, location_file, output_match, recent_writes
 from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, acceptance_reason, attested, check_candidate, check_definition, missing_inputs,
-                    candidate_outputs, contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
+                    candidate_outputs, contract_digest, extract_clauses, gate, get, live, unmapped_clauses, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, work_ok)
 from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
 from .store import (StateInsideProject, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
@@ -101,6 +101,8 @@ def req(args):
             rid = new_id(t["requirements"], "R")
             t["requirements"].append({"id": rid, "text": require_text(args.text, "requirement"),
                                       "anchor": require_text(args.anchor, "--anchor to the original request"), "status": "active"})
+            if args.covers:
+                t["requirements"][-1]["covers"] = sorted(set(args.covers))
             print(rid)
         elif args.action == "attest-only":
             r = get(t["requirements"], args.id)
@@ -761,10 +763,34 @@ def coverage(args):
         print(json.dumps({"original_request": t["original_request"], "amendments": t["amendments"],
                           "requirements": t["requirements"], "work": t["work"],
                           "checks": [check_definition(c) for c in t["checks"]], "findings": t["findings"]}, indent=2))
+    elif args.action == "items":
+        t = load_task(need(args))
+        covers = {}
+        for r in t["requirements"]:
+            for cid in r.get("covers") or []:
+                covers.setdefault(cid, []).append(r["id"])
+        for c in t.get("clauses") or []:
+            state = ", ".join(covers.get(c["id"], [])) or ("context: " + c["context"] if c.get("context") else "UNMAPPED")
+            print(f"{c['id']} [{state}] {c['text']}")
+    elif args.action in ("map", "context"):
+        with edit(args, "coverage." + args.action) as (_, t):
+            clause = get(t.get("clauses") or [], require_text(args.item, "request item ID (C-XX)"))
+            if args.action == "map":
+                r = get(t["requirements"], require_text(args.req, "--req naming the requirement that covers it"))
+                r["covers"] = sorted(set(r.get("covers") or []) | {clause["id"]})
+                clause.pop("context", None)
+            else:
+                clause["context"] = require_text(args.note, "--note saying why this item is context, not an outcome")
+            print(clause["id"] + (" -> " + args.req if args.action == "map" else " marked context"))
     else:
         with edit(args, "coverage.assert") as (_, t):
             if not t["requirements"]:
                 raise DmdError("cannot assert coverage of an empty requirement inventory")
+            loose = unmapped_clauses(t)
+            if loose:
+                raise DmdError("request items have no requirement: " + ", ".join(c["id"] for c in loose) +
+                               ". Map each (req add --covers C-XX, or coverage map C-XX --req R-XX) or mark it "
+                               "context (coverage context C-XX --note ...); dmd coverage items lists them")
             t["coverage"] = {"digest": contract_digest(t), "note": require_text(args.note, "request-to-record mapping --note"), "at": now()}
         print("coverage recorded; semantic completeness still requires source-request review")
 
@@ -834,6 +860,8 @@ def other(args):
     with edit(args, args.command) as (directory, t):
         if args.command == "amend":
             t["amendments"].append({"at": now(), "text": require_text(args.text, "operator amendment")})
+            if "clauses" in t:
+                t["clauses"] += extract_clauses(args.text, len(t["clauses"]) + 1, f"amendment {len(t['amendments'])}")
         elif args.command == "state":
             require_text(args.reason, "--reason recording the operator instruction or real interruption")
             if args.status == "ACTIVE" and t["state"] == "CANCELLED" and not args.authority:
@@ -1052,7 +1080,7 @@ HELP = {
     "finding": "Record, update, or list defects found in the project",
     "blocker": "Record, clear, or list concrete external blockers",
     "uncertain": "Record or reconcile an external operation with unknown outcome",
-    "coverage": "Show the contract or assert request-to-inventory coverage",
+    "coverage": "Show the contract; list, map or mark request items; assert coverage",
     "review": "Record the final request/diff/integration review",
     "status": "Print the report (--json for task and gate)",
     "next": "Gate JSON with the next executable actions",
@@ -1086,7 +1114,7 @@ def parser():
     def command(name, fn):
         s = sub.add_parser(name, help=HELP[name], description=HELP[name]); s.set_defaults(func=fn); return s
     s = command("init", init); s.add_argument("-m", "--message"); s.add_argument("--request-file"); s.add_argument("--authority", required=True); s.add_argument("--session"); s.add_argument("--new", action="store_true"); s.add_argument("--independent-review", action="store_true")
-    s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--authority"); s.add_argument("--json", action="store_true")
+    s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--covers", action="append", metavar="C-XX"); s.add_argument("--authority"); s.add_argument("--json", action="store_true")
     s = command("work", work); s.add_argument("action", choices=["add", "set", "remove", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace"); s.add_argument("--clear-deps", action="store_true"); s.add_argument("--json", action="store_true")
     s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"])
     for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence", "candidate", "approve"]:
@@ -1099,7 +1127,7 @@ def parser():
     s = command("blocker", blocker); s.add_argument("action", choices=["add", "clear", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--json", action="store_true")
     for flag in ["id", "item", "owner", "unblock", "proof"]: s.add_argument("--" + flag)
     s = command("uncertain", uncertain); s.add_argument("action", choices=["add", "resolve", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--proof"); s.add_argument("--json", action="store_true")
-    s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert"]); s.add_argument("--note")
+    s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert", "items", "map", "context"]); s.add_argument("item", nargs="?"); s.add_argument("--req"); s.add_argument("--note")
     s = command("review", review); s.add_argument("--kind", choices=["self", "independent"], required=True); s.add_argument("--reviewer", required=True); s.add_argument("--note", required=True); s.add_argument("--evidence", required=True)
     for name in ["status", "next", "gate", "report", "handoff", "reconcile"]:
         s = command(name, inspect_task); s.add_argument("--json", action="store_true"); s.add_argument("--save", action="store_true"); s.add_argument("--only", action="append", choices=SECTIONS, help="render one report section")

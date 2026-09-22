@@ -311,3 +311,91 @@ class StoreBoundary(unittest.TestCase):
                    isinstance(node, ast.ImportFrom) and node.level == 1 and node.module == "cli":
                     offenders.append(path.name)
         self.assertEqual(offenders, [])
+
+
+class RequestItemsAreAccounted(test_runtime.DmdFixture):
+    """R3: an outcome the operator listed explicitly cannot be silently dropped."""
+    REQUEST = ("Please ship the export feature:\n- CSV export for reports\n- JSON export for reports\n"
+               "- document both formats\n1. add a CLI flag\n2) keep the old endpoint working\n"
+               "```\n- not an item inside a code fence\n```\nThanks!\n")
+
+    def init(self, text):
+        request = self.home / "request.txt"; request.write_text(text)
+        self.cmd("init", "--request-file", str(request), "--authority", "operator")
+
+    def test_five_items_with_four_requirements_refuse_coverage(self):
+        self.init(self.REQUEST)
+        out, _ = self.cmd("coverage", "items")
+        self.assertEqual(len(out.splitlines()), 5, out)
+        for n in range(1, 5):
+            self.cmd("req", "add", f"outcome {n}", "--anchor", "request", "--covers", f"C-0{n}")
+        _, err = self.cmd("coverage", "assert", "--note", "mapped", code=2)
+        self.assertIn("C-05", err)
+        out, _ = self.cmd("next")
+        g = json.loads(out)
+        self.assertIn("C-05", json.dumps(g["reasons"]))
+        self.assertIn("1 request item(s) unmapped", g["summary"]["headline"])
+        self.assertIn("dmd coverage context C-05 --note", g["next"][0]["action"])
+        self.cmd("coverage", "context", "C-05", "--note", "the old endpoint is untouched by this change")
+        self.cmd("coverage", "assert", "--note", "mapped")
+
+    def test_map_links_an_existing_requirement(self):
+        self.init(self.REQUEST)
+        self.cmd("req", "add", "all exports", "--anchor", "request", "--covers", "C-01", "--covers", "C-02")
+        for item in ("C-03", "C-04", "C-05"):
+            self.cmd("coverage", "map", item, "--req", "R-01")
+        self.cmd("coverage", "assert", "--note", "one requirement covers all")
+        _, err = self.cmd("req", "add", "x", "--anchor", "a", "--covers", "C-99", code=2)
+        self.assertIn("unknown request item", err)
+
+    def test_prose_request_is_unaffected(self):
+        self.init("Make the exporter faster and keep its output identical.")
+        self.cmd("req", "add", "faster", "--anchor", "request")
+        self.cmd("coverage", "assert", "--note", "one outcome")
+
+    def test_amendment_items_join_the_inventory(self):
+        self.init("Fix the parser.")
+        self.cmd("req", "add", "parser fixed", "--anchor", "request"); self.cmd("coverage", "assert", "--note", "n")
+        self.cmd("amend", "Also:\n- handle empty input")
+        _, err = self.cmd("coverage", "assert", "--note", "n", code=2)
+        self.assertIn("C-01", err)
+
+    def test_tasks_created_before_items_keep_their_contract_digest(self):
+        self.setup_task()
+        d = locate(self.repo); t = load_task(d)
+        before = m.contract_digest(t)
+        t.pop("clauses")
+        legacy = m.contract_digest(t)
+        t["clauses"] = []
+        self.assertNotEqual(before, legacy)  # the field is part of new contracts...
+        t.pop("clauses")
+        self.assertEqual(m.contract_digest(t), legacy)  # ...and absent from old ones
+
+
+class NextActionsAreRunnable(test_runtime.DmdFixture):
+    """Live-host finding: an agent following `dmd next` literally hit missing required
+    flags (coverage assert without --note, review without --kind/--reviewer/--evidence)."""
+    def commands(self):
+        import re, shlex
+        from dmdlib.cli import parser
+        out, _ = self.cmd("next")
+        found = []
+        for step in json.loads(out)["next"]:
+            for fragment in re.findall(r"dmd ([a-z-]+ [^;()]*?)(?=;|, then|, or | or | and dmd|\)|$)", step["action"]):
+                argv = shlex.split(re.sub(r"<[^>]*>", "x", fragment.replace("...", "")))
+                if argv[:2] in (["check", "add"],) and "--req" in argv and argv[argv.index("--req") + 1] == "R-XX":
+                    continue  # a template naming the requirement to choose
+                parser().parse_args(argv)  # raises SystemExit on a missing required flag
+                found.append(argv[0])
+        return found
+
+    def test_every_suggested_command_parses(self):
+        self.cmd("init", "-m", "x", "--authority", "operator")
+        self.assertIn("req", self.commands())
+        self.cmd("req", "add", "outcome", "--anchor", "request")
+        self.assertIn("check", self.commands())
+        self.cmd("check", "add", "--req", "R-01", "--cmd", "python3 -B verify.py", "--expect", "x",
+                 "--match", "ACCEPTANCE_PASS:1", "--approve", "inspected")
+        self.assertEqual(sorted(set(self.commands())), ["coverage", "run"])
+        self.cmd("run", "A-01", "--quiet-window", "0"); self.cmd("coverage", "assert", "--note", "one outcome")
+        self.assertEqual(self.commands(), ["review"])

@@ -464,7 +464,7 @@ class ReasonCase(GitFixture):
         (self.repo / "subject.py").write_text("VALUE = 43\n")
         g = json.loads(self.cmd("gate", code=1)[0])
         self.assertIn("W-01: checks owed: A-01", g["reasons"])
-        self.assertEqual([x["action"] for x in g["next"] if x["id"] == "W-01"], ["rerun stale evidence: A-01"])
+        self.assertEqual([x["action"] for x in g["next"] if x["id"] == "W-01"], ["rerun stale evidence: dmd run A-01"])
         self.assertEqual(g["summary"]["work_unverified"], ["W-01"])
 
     def test_stop_hook_repeats_the_headline_and_rerun_command(self):
