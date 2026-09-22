@@ -2,6 +2,7 @@
 from __future__ import annotations
 import copy
 import json
+import re
 import sys
 from pathlib import Path
 from .storage import DmdError, append_line, atomic, digest, lock, now, private_dir, read_json, safe_text, save
@@ -110,10 +111,30 @@ def ask_operator(root, payload, session, mode):
     atomic(pending / (approval_key(payload, session) + ".json"),
            json.dumps({"ops": ops, "at": now(), "session": digest(session)}))
     what = "; ".join(authority.DESCRIPTIONS[op] for op in ops)
+    detail = decisions_named(payload, session)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                      "permissionDecisionReason": f"Done Means Done: this command would {what}. That is the operator's "
-                      "decision: approve only if you asked for it."}}))
+                      "permissionDecisionReason": f"Done Means Done: this command would {what}{detail}. That is the "
+                      "operator's decision: approve only if you asked for it."}}))
     return 0
+
+
+def decisions_named(payload, session):
+    """For `dmd authority confirm AU-XX`, the decisions themselves, so the operator is not
+    asked to approve an opaque ID."""
+    import re
+    wanted = re.findall(r"\bAU-\d+\b", str((payload.get("tool_input") or {}).get("command") or ""))
+    if not wanted:
+        return ""
+    directory = None
+    try:
+        binding = binding_path(session)
+        directory = Path(read_json(binding)["task_dir"]) if binding.exists() else lookup(payload.get("cwd") or "")
+        entries = {e["id"]: e for e in load_task(directory).get("authority") or []} if directory else {}
+    except (DmdError, OSError, KeyError, TypeError):
+        entries = {}
+    named = [f"{i} = {entries[i]['op']} {entries[i]['target']}, recorded as {safe_text(entries[i]['text'], 200)!r}"
+             for i in wanted if i in entries]
+    return (": " + "; ".join(named)) if named else ""
 
 
 def record_approval(root, payload, session):

@@ -430,6 +430,14 @@ class OperatorDecisions(test_runtime.DmdFixture):
             self.assertEqual(self.bash("pre-tool-use", sneaky, tool_use_id="tu-3")["hookSpecificOutput"]["permissionDecision"],
                              "ask", sneaky)
 
+    def test_confirm_prompt_names_the_decision(self):
+        self.setup_task(); self.channel()
+        self.cmd("req", "add", "second", "--anchor", "request")
+        self.cmd("req", "cancel", "--id", "R-02", "--authority", "operator dropped the second outcome")
+        asked = self.bash("pre-tool-use", "dmd authority confirm AU-01", tool_use_id="tu-7")
+        reason = asked["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("req.cancel R-02", reason); self.assertIn("operator dropped the second outcome", reason)
+
     def test_unconfirmed_cancel_keeps_the_task_open(self):
         self.setup_task(); self.channel()
         self.cmd("req", "add", "second outcome", "--anchor", "request")
