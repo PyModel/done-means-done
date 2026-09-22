@@ -233,6 +233,23 @@ class NoCheapExits(test_runtime.DmdFixture):
         self.cmd("finding", "add", "maybe wrong", "--location", "subject.py:1", "--status", "suspected")
         self.cmd("finding", "set", "--id", "F-01", "--status", "disproved", "--note", "traced", "--evidence", str(art))
 
+    def test_a_disproof_is_bound_to_the_files_it_examined(self):
+        self.setup_task(); art = self.home / "trace.txt"; art.write_text("traced: invariant holds")
+        (self.repo / "helper.py").write_text("X = 1\n")
+        self.cmd("finding", "add", "maybe wrong", "--location", "subject.py:1", "--status", "suspected")
+        self.cmd("finding", "set", "--id", "F-01", "--status", "disproved", "--note", "traced", "--evidence", str(art),
+                 "--input", "helper.py")
+        def reason():
+            out, _ = self.cmd("gate", "--json", code=1)
+            return [r for r in json.loads(out)["reasons"] if r.startswith("F-01")]
+        (self.repo / "unrelated.py").write_text("print(1)\n")
+        self.assertEqual(reason(), [], "an edit elsewhere must not reopen the disproof")
+        (self.repo / "helper.py").write_text("X = 2\n")
+        self.assertIn("helper.py changed", reason()[0])
+        (self.repo / "helper.py").write_text("X = 1\n")
+        (self.repo / "subject.py").write_text("VALUE = 41\n")
+        self.assertIn("subject.py changed", reason()[0])
+
     def test_cancelling_a_requirement_cannot_strand_dependent_work(self):
         self.setup_task()
         self.cmd("req", "add", "Second", "--anchor", "request")

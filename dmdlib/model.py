@@ -4,7 +4,7 @@ import re
 from collections import deque
 from pathlib import Path
 from .storage import DmdError, digest, evidence_ok
-from .source import snapshot, MissingCandidate
+from .source import file_digest, snapshot, MissingCandidate
 
 SCHEMA = 2
 TASK_STATES = {"ACTIVE", "PAUSED", "BLOCKED", "CANCELLED", "COMPLETE"}
@@ -407,9 +407,18 @@ class Assessment:
                     break
                 if status == "disproved":
                     fp = self.fp
-                    bound = (source_digest(fp), fp.get(str(Path(t["root"])))) if isinstance(fp, dict) else (fp,)
-                    if not f.get("note") or f.get("source") not in bound or not evidence_ok(self.task_dir, f.get("artifact")):
+                    binding = (f.get("binding") or {}).get("files")
+                    if binding:
+                        # Bound to the files it examined: an edit elsewhere leaves it standing.
+                        moved = [Path(p).name for p, d in sorted(binding.items()) if file_digest(p) != d]
+                    else:
+                        # Recorded before 0.7.0, or with no resolvable location: the whole tree.
+                        bound = (source_digest(fp), fp.get(str(Path(t["root"])))) if isinstance(fp, dict) else (fp,)
+                        moved = [] if f.get("source") in bound else ["the source tree"]
+                    if not f.get("note") or not evidence_ok(self.task_dir, f.get("artifact")):
                         reason = "disproof needs evidence"
+                    elif moved:
+                        reason = f"disproof is stale: {', '.join(moved)} changed since it was recorded; re-examine and record it again"
                     elif f.get("confirmed_at") and not any(self.accepted(c) and not attested(get(t["checks"], c)) for c in f.get("checks", [])):
                         # Confirmation was evidence of a defect; retracting it takes an executed
                         # check showing the invariant holds, not a note and an arbitrary file.

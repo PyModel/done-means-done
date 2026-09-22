@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
-from .source import candidate_root, drift, recent_writes
+from .source import candidate_root, drift, file_digest, location_file, recent_writes
 from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, acceptance_reason, attested, check_candidate, check_definition, missing_inputs,
                     contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, work_ok)
@@ -660,7 +660,15 @@ def finding(args):
                 require_text(args.note, "evidence-backed resolution --note")
             if f["status"] == "disproved":
                 f["artifact"] = artifact_from_file(directory, args.evidence)
-                f["source"] = source_digest(task_fingerprint(t))
+                # A disproof holds while the files it examined are unchanged: the location
+                # and any --input. Without a resolvable file it binds to the whole tree.
+                files = sorted({p for p in [location_file(f["location"], t["root"])]
+                                + [declared_input(t["root"], x) for x in args.input or []] if p})
+                f.pop("source", None); f.pop("binding", None)
+                if files:
+                    f["binding"] = {"files": {p: file_digest(p) for p in files}}
+                else:
+                    f["source"] = source_digest(task_fingerprint(t))
                 from .model import assess
                 reason = assess(directory, t, task_fingerprint(t)).findings.get(f["id"])
                 if reason:
@@ -1059,7 +1067,7 @@ def parser():
     s = command("preview", preview); s.add_argument("id")
     s = command("approve", approve); s.add_argument("id"); s.add_argument("--note", required=True)
     s = command("run", run); s.add_argument("ids", nargs="*"); s.add_argument("--all", action="store_true"); s.add_argument("--red", action="store_true"); s.add_argument("--quiet-window", type=float); s.add_argument("--wait-exclusive", type=float)
-    s = command("finding", finding); s.add_argument("action", choices=["add", "set", "defer", "list"]); s.add_argument("--authority"); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--location"); s.add_argument("--status", choices=sorted(FINDING_STATES)); s.add_argument("--origin", choices=["introduced", "pre-existing", "dependency", "unknown"]); s.add_argument("--note"); s.add_argument("--work", action="append"); s.add_argument("--check", action="append"); s.add_argument("--duplicate"); s.add_argument("--evidence"); s.add_argument("--json", action="store_true")
+    s = command("finding", finding); s.add_argument("action", choices=["add", "set", "defer", "list"]); s.add_argument("--authority"); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--location"); s.add_argument("--status", choices=sorted(FINDING_STATES)); s.add_argument("--origin", choices=["introduced", "pre-existing", "dependency", "unknown"]); s.add_argument("--note"); s.add_argument("--work", action="append"); s.add_argument("--check", action="append"); s.add_argument("--duplicate"); s.add_argument("--evidence"); s.add_argument("--input", action="append"); s.add_argument("--json", action="store_true")
     s = command("blocker", blocker); s.add_argument("action", choices=["add", "clear", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--json", action="store_true")
     for flag in ["id", "item", "owner", "unblock", "proof"]: s.add_argument("--" + flag)
     s = command("uncertain", uncertain); s.add_argument("action", choices=["add", "resolve", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--proof"); s.add_argument("--json", action="store_true")

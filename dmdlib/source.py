@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import os
+import re
 import stat
 import subprocess
 import time
@@ -196,6 +197,28 @@ def candidate_root(cwd, task_root):
         return str(task_root)
     top = git(cwd, "rev-parse", "--show-toplevel")
     return str(Path(os.fsdecode(top).rstrip("\n")).resolve()) if top else str(cwd)
+
+def location_file(location, root):
+    """The regular file a finding's --location names (`path`, `path:line`, `path:line:col`,
+    `path:start-end`), resolved against the task root; None for anything else."""
+    text = str(location or "").strip()
+    for candidate in dict.fromkeys([text, re.sub(r":\d+(?:-\d+)?(?::\d+)?$", "", text)]):
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        path = path if path.is_absolute() else Path(root) / path
+        if path.is_file():
+            return str(path.resolve())
+    return None
+
+def file_digest(path):
+    """Content digest of one file, or a marker naming why there is none."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return "missing"
+    except OSError as exc:
+        return f"unreadable:{exc.errno}"
 
 def recent_writes(root, window):
     """Dirty or untracked paths modified within the last `window` seconds. A file still
