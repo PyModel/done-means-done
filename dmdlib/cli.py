@@ -19,7 +19,7 @@ from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, accept
                     source_for, task_fingerprint, task_snapshot, work_ok)
 from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
 from .store import (StateInsideProject, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
-                    pid_alive, prune_sessions, remember_session, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
+                    index_run, pid_alive, prune_sessions, remember_session, unindex_run, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
 
 QUIET_WINDOW_SECONDS = 3.0
@@ -490,6 +490,7 @@ def _run(args):
                             "started": now(), "source": fps, "candidates": candidates,
                             "pid": os.getpid(), "host": socket.gethostname(), "red": bool(args.red)}
             save(directory, t, "run.start", checks=[c["id"] for c in checks], red=args.red)
+            index_run(directory, t["running"])
         poll = {"at": 0.0, "value": False}
         def cancelled():
             # Re-read at most once per second; a transient read failure is not a cancel.
@@ -601,6 +602,7 @@ def _run(args):
                 summary.append(row)
             skipped = [c["id"] for c, _, _ in plan[len(results):]]
             t["running"] = None
+            unindex_run(token)
             save(directory, t, "run.finish", results=[(r["check"], r["result"]) for r in summary], skipped=skipped)
         for row in summary:
             print(json.dumps(row))
@@ -848,6 +850,7 @@ def other(args):
                     found["accepted_because"] = f"run lock was free; the runner was on host {r.get('host')}, so its liveness was not checkable here"
                 found["external_effects"] = "not proven by this command; your --proof must reconcile them"
                 t["running"] = None
+                unindex_run(r.get("token"))
                 t.setdefault("recovery", []).append({"at": now(), "proof": args.proof, "found": found})
                 print(json.dumps(found, indent=2))
 
@@ -1036,6 +1039,8 @@ HELP = {
     "migrate": "Import a schema-1 record into a new schema-2 task",
 }
 
+HOOK_EVENTS = ("session-start", "stop", "task-completed", "post-tool-use", "post-tool-failure")
+
 def parser():
     p = argparse.ArgumentParser(prog="dmd", description="Persistent obligations, strict remediation, verified completion")
     p.add_argument("--version", action="version", version=__version__)
@@ -1070,7 +1075,7 @@ def parser():
     s = command("map-host-task", other); s.add_argument("--host-id", required=True); s.add_argument("--work", required=True)
     s = command("recover-run", other); s.add_argument("--proof", required=True)
     s = command("config", configuration); s.add_argument("--mode", choices=["off", "observe", "enforce"]); s.add_argument("--max-no-progress", type=int)
-    s = command("hook", None); s.add_argument("event", choices=["session-start", "stop", "task-completed", "post-tool-use", "post-tool-failure"])
+    s = command("hook", None); s.add_argument("event", choices=HOOK_EVENTS)
     s = command("list", None); s.add_argument("--json", action="store_true"); s.add_argument("--state", action="append")
     command("doctor", doctor)
     command("gc", gc)
@@ -1081,7 +1086,12 @@ def parser():
 
 def main(argv=None):
     os.umask(0o077)
-    args = parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) == 2 and argv[0] == "hook" and argv[1] in HOOK_EVENTS:
+        # Hooks fire on every tool call; they skip building the full command parser.
+        args = argparse.Namespace(command="hook", event=argv[1], cwd=os.getcwd(), task=None)
+    else:
+        args = parser().parse_args(argv)
     try:
         if args.command == "hook":
             from .hooks import handle

@@ -77,8 +77,9 @@ def atomic(path, data):
         if os.path.exists(tmp):
             os.unlink(tmp)
 
-def append_line(path, text):
-    """Append one history line. The projection is recoverable, so replace-atomicity is unnecessary."""
+def append_line(path, text, sync=True):
+    """Append one history line. The projection is recoverable, so replace-atomicity is unnecessary.
+    `sync=False` skips the fsync for high-frequency bookkeeping that no decision reads."""
     path = Path(path)
     private_dir(path.parent)
     if path.exists() or path.is_symlink():
@@ -88,7 +89,8 @@ def append_line(path, text):
         if os.fstat(fd).st_nlink != 1:
             raise DmdError(f"refusing linked history file: {path}")
         os.write(fd, text.encode() if isinstance(text, str) else text)
-        os.fsync(fd)
+        if sync:
+            os.fsync(fd)
     finally:
         os.close(fd)
 

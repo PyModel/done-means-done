@@ -233,7 +233,8 @@ class RuntimeCase(DmdFixture):
         self.assertTrue((self.state / "sessions").exists()); self.assertFalse((self.home / "escape.json").exists())
     def test_hook_does_not_persist_raw_payload(self):
         self.setup_task(); self.cmd("hook", "post-tool-use", stdin=self.payload(tool_name="Bash", tool_response="private-secret-do-not-log"))
-        self.assertNotIn("private-secret-do-not-log", (locate(self.repo) / "task.json").read_text())
+        for name in ("task.json", "events.jsonl", "activity.jsonl"):
+            self.assertNotIn("private-secret-do-not-log", (locate(self.repo) / name).read_text())
 
 class RunnerCase(unittest.TestCase):
     def setUp(self):

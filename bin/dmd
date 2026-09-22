@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Portable entry point; invoke with Python 3.10+ on macOS/Linux."""
+import os
 import sys
-sys.dont_write_bytecode = True
 from pathlib import Path
+# Bytecode never lands in the skill directory. It is cached under the user's cache home
+# instead, because recompiling the package on every hook call is most of a hook's cost.
+if os.environ.get("PYTHONDONTWRITEBYTECODE"):
+    sys.dont_write_bytecode = True
+else:
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "done-means-done" / "pycache"
+    sys.pycache_prefix = str(cache)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dmdlib.cli import main
 raise SystemExit(main())

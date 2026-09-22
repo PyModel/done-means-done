@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from .storage import DmdError, atomic, digest, lock, now, read_json, safe_text, save
+from .storage import DmdError, append_line, atomic, digest, lock, now, read_json, safe_text, save
 from .model import check_candidate, evaluate, live, task_fingerprint
 from .source import identity
 from .store import (StateInsideProject, bind_session, binding_path, load_config, load_task, locate, remember_session,
@@ -63,6 +63,33 @@ def finished(directory):
     return load_task(directory)["state"] == "COMPLETE"
 
 
+def activity(directory, event, payload):
+    # Bookkeeping only, on every tool call: one unsynced line in activity.jsonl. It takes
+    # no lock and never rewrites task.json, so it cannot contend with `dmd run` and costs
+    # no fsync; no gate or safeguard reads it.
+    append_line(directory / "activity.jsonl", json.dumps({"at": now(), "kind": "hook." + event,
+                "tool": safe_text(payload.get("tool_name", "unknown"), 80)}) + "\n", sync=False)
+
+
+def quick_activity(root, binding, cwd, payload, event):
+    """The common tool-call case without Git discovery: a bound session working inside
+    its unfinished task's root. Anything else takes the full path."""
+    if not binding.exists():
+        return False
+    try:
+        d = Path(read_json(binding)["task_dir"])
+        if not d.is_absolute() or not d.resolve().is_relative_to((root / "v2").resolve()):
+            return False
+        t = read_json(d / "task.json")
+        task_root, here = Path(t["root"]), Path(cwd).resolve()
+    except (DmdError, OSError, KeyError, TypeError, ValueError):
+        return False
+    if t.get("state") == "COMPLETE" or not (here == task_root or task_root in here.parents):
+        return False
+    activity(d, event, payload)
+    return True
+
+
 def handle(args):
     """Hooks fail open. The only nonzero exit is TaskCompleted enforcement; every internal
     error becomes a systemMessage naming the cause and exit 0, because a hook that exits 2
@@ -103,6 +130,8 @@ def _handle(args):
     directory = None
     notice = None
     binding = binding_path(session)
+    if args.event in ("post-tool-use", "post-tool-failure") and quick_activity(root, binding, cwd, payload, args.event):
+        return 0
     if binding.exists():
         d = Path(read_json(binding)["task_dir"])
         if not d.is_absolute() or not d.resolve().is_relative_to((root / "v2").resolve()):
@@ -145,15 +174,7 @@ def _handle(args):
         # no enforcement. A contract change reopens it through the CLI, not a hook.
         return 0
     if args.event in ("post-tool-use", "post-tool-failure"):
-        # Bookkeeping only. A contended lock (the agent is mid `dmd run`) must not surface
-        # as a hook failure to the host; the event is dropped, never the task state.
-        try:
-            with lock(directory, wait=1.0):
-                task = load_task(directory)
-                save(directory, task, "hook." + args.event, tool=safe_text(payload.get("tool_name", "unknown"), 80))
-        except DmdError as exc:
-            if "owns this lock" not in str(exc):
-                raise
+        activity(directory, args.event, payload)
         return 0
     with lock(directory):
         task = load_task(directory)

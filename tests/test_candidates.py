@@ -260,6 +260,15 @@ class PreflightCase(GitFixture):
         t["running"]["pid"] = 2 ** 22 + 7; (d / "task.json").write_text(json.dumps(t))
         _, err = self.cmd("run", "A-01", *QUIET, code=2); self.assertIn("not alive", err)
 
+    def test_run_index_prunes_a_run_its_task_no_longer_records(self):
+        self.setup_task()
+        from dmdlib.store import runs_dir, other_runs
+        orphan = runs_dir() / "gone.json"; orphan.write_text(json.dumps({"task_dir": str(self.home / "nowhere"), "token": "gone"}))
+        self.assertEqual(other_runs("T-x", [str(self.repo.resolve())]), [])
+        self.assertFalse(orphan.exists())
+        self.cmd("run", "A-01", *QUIET)
+        self.assertEqual(sorted(p.name for p in runs_dir().glob("*.json")), [], "a finished run leaves its index entry")
+
 
 class ExclusiveCase(GitFixture):
     """S5: checks sharing a named resource never run concurrently, across tasks and sessions."""

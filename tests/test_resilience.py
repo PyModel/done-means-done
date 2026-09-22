@@ -90,12 +90,26 @@ class HookContentionCase(DmdFixture):
         thread.join()
         self.assertEqual(out, ""); self.assertEqual(err, "")
 
-    def test_post_tool_use_is_recorded_when_the_lock_is_free(self):
+    def test_bound_session_tool_activity_skips_git_discovery(self):
+        from unittest.mock import patch
         self.setup_task()
-        self.cmd("hook", "post-tool-use", stdin=self.payload(tool_name="Edit"))
+        self.cmd("hook", "post-tool-use", stdin=self.payload(tool_name="Edit"))  # binds the session
+        with patch("dmdlib.hooks.locate", side_effect=AssertionError("full path taken")):
+            out, err = self.cmd("hook", "post-tool-use", stdin=self.payload(tool_name="Bash"))
+        self.assertEqual((out, err), ("", ""))
         out, _ = self.cmd("status", "--json")
-        kinds = [e["kind"] for e in json.loads(out)["task"]["events"]]
-        self.assertIn("hook.post-tool-use", kinds)
+        lines = (Path(json.loads(out)["task_dir"]) / "activity.jsonl").read_text().splitlines()
+        self.assertEqual(json.loads(lines[-1])["tool"], "Bash")
+
+    def test_post_tool_use_is_recorded_without_rewriting_the_task(self):
+        # R6: tool activity is an append-only line, not a task.json rewrite per tool call.
+        self.setup_task()
+        out, _ = self.cmd("status", "--json"); before = json.loads(out)["task"]["sequence"]
+        self.cmd("hook", "post-tool-use", stdin=self.payload(tool_name="Edit"))
+        out, _ = self.cmd("status", "--json"); data = json.loads(out)
+        self.assertEqual(data["task"]["sequence"], before)
+        lines = (Path(data["task_dir"]) / "activity.jsonl").read_text().splitlines()
+        self.assertEqual(json.loads(lines[-1])["kind"], "hook.post-tool-use")
 
 
 class SiblingWorktreeCase(DmdFixture):

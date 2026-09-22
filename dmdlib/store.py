@@ -284,17 +284,47 @@ def pid_alive(pid, host):
         return True
     return True
 
+def runs_dir():
+    directory = private_dir(state_root() / "runs")
+    seeded = directory / ".seeded"
+    if not seeded.exists():
+        # Runs recorded before the index existed (an upgrade mid-run) are indexed once.
+        for task_dir, t in task_records():
+            if isinstance(t, dict) and (t.get("running") or {}).get("token"):
+                with contextlib.suppress(DmdError, OSError):
+                    atomic(directory / (ident(t["running"]["token"]) + ".json"),
+                           json.dumps({"task_dir": str(task_dir), "token": t["running"]["token"]}))
+        atomic(seeded, "")
+    return directory
+
+def index_run(directory, running):
+    """Record a started run in the machine-wide run index, so a preflight reads the few
+    runs in flight instead of every task record in the state root."""
+    atomic(runs_dir() / (ident(running["token"]) + ".json"), json.dumps({"task_dir": str(directory), "token": running["token"]}))
+
+def unindex_run(token):
+    if token:
+        with contextlib.suppress(OSError, DmdError):
+            (runs_dir() / (ident(token) + ".json")).unlink()
+
 def other_runs(task_id, candidates):
     """Runs recorded by other tasks on this machine that touch one of our candidates. A
-    live one is a concurrent writer; a dead one is a leftover the other task must recover."""
+    live one is a concurrent writer; a dead one is a leftover the other task must recover.
+    An index entry whose task no longer records that run is an orphan and is pruned."""
     found = []
-    for path in state_root().glob("v2/*/*/*/task.json"):
+    for entry in sorted(runs_dir().glob("*.json")):
+        ref = None
         try:
-            t = read_json(path)
-        except (DmdError, OSError):
-            continue
+            ref = read_json(entry)
+            t = read_json(Path(ref["task_dir"]) / "task.json")
+        except (DmdError, OSError, KeyError, TypeError):
+            t = None
         r = t.get("running") if isinstance(t, dict) else None
-        if not r or t.get("task_id") == task_id:
+        if not r or r.get("token") != (ref or {}).get("token"):
+            with contextlib.suppress(OSError):
+                entry.unlink()
+            continue
+        if t.get("task_id") == task_id:
             continue
         overlap = sorted(set(r.get("candidates") or []) & set(candidates))
         if overlap:
