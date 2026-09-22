@@ -160,6 +160,38 @@ class RunnerSurvivesItsParent(test_runtime.DmdFixture):
         proc.send_signal(signal.SIGKILL); proc.wait(timeout=10)
         self.assertTrue(self.gone_within(pid, 6), "check kept running after its runner was killed")
 
+    def supervise(self, command, close_status):
+        import os, subprocess, sys
+        from pathlib import Path
+        child = Path(__file__).resolve().parents[1] / "dmdlib" / "runner_child.py"
+        r, w = os.pipe(); os.set_inheritable(w, True)
+        if close_status:
+            os.close(r)
+        p = subprocess.Popen([sys.executable, "-B", str(child), str(w), "/bin/sh", command], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(w,), start_new_session=True)
+        os.close(w)
+        self.addCleanup(lambda: (p.poll() is None and os.killpg(p.pid, 9), p.wait(), p.stdout.close(), p.stderr.close(),
+                                 p.stdin.close(), None if close_status else os.close(r)))
+        return p
+
+    def test_supervisor_holds_when_the_parent_stopped_listening(self):
+        """The parent closes the status pipe on an interrupt or output-limit break; the
+        command's exit then hit EPIPE, the interpreter finalized under the stdin watcher
+        thread and aborted (SIGABRT, a macOS crash report) instead of holding the group."""
+        import time
+        p = self.supervise("sleep 0.2", close_status=True)
+        time.sleep(2.5)  # shutdown waits ~1 s for the reader lock before aborting
+        self.assertIsNone(p.poll(), f"supervisor exited ({p.returncode}): {p.stderr.read1(300) if p.poll() is not None else b''}")
+
+    def test_supervisor_exits_cleanly_when_orphaned(self):
+        import signal, time
+        p = self.supervise("sleep 0.1", close_status=False)
+        time.sleep(0.5)
+        p.stdin.close()  # the parent is gone: the watcher terminates the whole group
+        p.wait(timeout=5)
+        self.assertNotEqual(p.returncode, -signal.SIGABRT)
+        self.assertNotIn(b"Fatal Python error", p.stderr.read())
+
 
 class LessCeremonySameGuarantees(test_runtime.DmdFixture):
     def test_author_and_approve_in_one_call(self):
