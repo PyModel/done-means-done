@@ -137,6 +137,14 @@ def decisions_named(payload, session):
     return (": " + "; ".join(named)) if named else ""
 
 
+def session_task(root, session):
+    binding = binding_path(session)
+    try:
+        return Path(read_json(binding)["task_dir"]) if binding.exists() else None
+    except (DmdError, OSError, KeyError, TypeError):
+        return None
+
+
 def record_approval(root, payload, session):
     """PostToolUse after an asked command: the operator approved it, so the decisions it
     recorded (and any config change it made) are confirmed. A decision recorded by a
@@ -154,8 +162,15 @@ def record_approval(root, payload, session):
             if isinstance(data.get("pending"), dict) and (data["pending"].get("at") or "") >= since:
                 data.pop("pending")
                 save_config(data)
+        # Only this session's own tasks: the bound one, the one at its cwd or a --cwd the
+        # command named, and any that recorded the session. An approval in one project
+        # never confirms a decision another agent made elsewhere on the machine.
+        mine = {str(d) for d in [session_task(root, session)] + [lookup(c) for c in [payload.get("cwd")] + re.findall(
+            r"--cwd[=\s]+(\S+)", str((payload.get("tool_input") or {}).get("command") or "")) if c] if d}
         for directory, t in task_records():
-            if isinstance(t, dict) and authority.confirm(copy.deepcopy(t), ops, since, "host-prompt"):
+            if not isinstance(t, dict) or (str(directory) not in mine and digest(session) not in t.get("sessions", [])):
+                continue
+            if authority.confirm(copy.deepcopy(t), ops, since, "host-prompt"):
                 with transaction(directory, "authority.confirmed", allow_cancelled=True) as task:
                     authority.confirm(task, ops, since, "host-prompt")
     finally:

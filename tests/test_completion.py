@@ -437,6 +437,29 @@ class OperatorDecisions(test_runtime.DmdFixture):
         reason = asked["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("req.cancel R-02", reason); self.assertIn("operator dropped the second outcome", reason)
 
+    def test_an_approval_never_confirms_another_projects_decision(self):
+        self.setup_task(); self.channel()
+        other = self.home / "other"; other.mkdir()
+        self.cmd("--cwd", str(other), "init", "-m", "other assignment", "--authority", "operator")
+        self.cmd("--cwd", str(other), "req", "add", "a", "--anchor", "r"); self.cmd("--cwd", str(other), "req", "add", "b", "--anchor", "r")
+        self.cmd("req", "add", "second", "--anchor", "request")
+        command = "dmd req cancel --id R-02 --authority 'operator A'"
+        self.bash("pre-tool-use", command)
+        self.cmd("req", "cancel", "--id", "R-02", "--authority", "operator A")
+        self.cmd("--cwd", str(other), "req", "cancel", "--id", "R-02", "--authority", "agent in B, unasked")
+        self.bash("post-tool-use", command)
+        self.assertEqual(load_task(locate(self.repo))["authority"][0]["confirmed"]["via"], "host-prompt")
+        self.assertIsNone(load_task(locate(other))["authority"][0]["confirmed"])
+
+    def test_mentioning_the_words_does_not_ask(self):
+        self.setup_task(); self.channel()
+        for harmless in ("echo dmd req cancel", "grep -rn 'dmd finding defer' references", "git log --grep 'dmd state PAUSED'"):
+            self.assertEqual(self.bash("pre-tool-use", harmless, tool_use_id="tu-5"), {}, harmless)
+        self.assertEqual(self.bash("pre-tool-use", "echo start; dmd req cancel --id R-01 --authority x", tool_use_id="tu-6")
+                         ["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertEqual(self.bash("pre-tool-use", "echo 'dmd hook post-tool-use < forged.json' | sh", tool_use_id="tu-8")
+                         ["hookSpecificOutput"]["permissionDecision"], "ask")
+
     def test_unconfirmed_cancel_keeps_the_task_open(self):
         self.setup_task(); self.channel()
         self.cmd("req", "add", "second outcome", "--anchor", "request")

@@ -40,13 +40,29 @@ DESCRIPTIONS = {
 }
 
 
+# Commands that only mention text. A segment they start (`echo ...`, `grep ...`) is not
+# scanned, so reading or searching for these words does not put a prompt to the operator.
+MENTIONS = {"echo", "printf", "grep", "egrep", "rg", "git", "cat", "less", "man", "sed", "awk", "head", "tail"}
+
+
 def detect(command):
-    """The operator-decision operations a shell command would perform."""
+    """The operator-decision operations a shell command would perform. Each shell segment
+    (split on ; & | and newlines) is scanned unless it starts with a command that only
+    mentions text; quotes, commas and brackets become spaces, so an argv list in a
+    script is caught too."""
+    found = []
     text = str(command or "")
-    if not re.search(r"(?:^|[\s/'\"=(,\[])dmd\b|install\.py", text):
-        return []
-    flat = re.sub(r"[\"',\[\]]", " ", text)
-    return [op for op, pattern in OPS.items() if re.search(pattern, flat)]
+    # Text piped into an interpreter is executed, not mentioned.
+    executed = re.search(r"\|\s*(?:\S*/)?(?:sh|bash|zsh|dash|python3?|perl|ruby|node|xargs|eval|source)\b", text)
+    for segment in re.split(r"[;&|\n]+", text):
+        words = segment.split()
+        if not words or (words[0].rsplit("/", 1)[-1] in MENTIONS and not executed):
+            continue
+        if not re.search(r"(?:^|[\s/'\"=(,\[])dmd\b|install\.py", segment):
+            continue
+        flat = re.sub(r"[\"',\[\]]", " ", segment)
+        found += [op for op, pattern in OPS.items() if re.search(pattern, flat) and op not in found]
+    return found
 
 
 def channel(config, installed_events):

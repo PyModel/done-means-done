@@ -21,7 +21,7 @@ Until 0.7.0 each one took an `--authority "..."` flag, which is text the agent t
    - The reason text names what the command would do. For `authority confirm` it also names the decisions themselves.
    - The hook writes a ticket keyed by `tool_use_id`.
 2. The CLI logs every such decision as `AU-XX`, with what it replaced.
-3. PostToolUse for the same `tool_use_id` means the operator approved and the command ran. The hook marks every decision the command recorded as confirmed (`host-prompt`). The operator can also confirm on their own terminal (`terminal`).
+3. PostToolUse for the same `tool_use_id` means the operator approved and the command ran. The hook marks the decisions that command recorded as confirmed (`host-prompt`), and only in this session's own tasks: the bound task, the task at its cwd or at a `--cwd` the command named, and tasks that recorded the session. An approval in one project never confirms another agent's decision elsewhere. The live test found that bleed, and a regression test covers it. The operator can also confirm on their own terminal (`terminal`).
 4. With a confirmation channel (enforce mode, and PreToolUse registered by the installer), an unconfirmed decision does not count:
    - the gate owes `AU-XX` as an actionable reason that no blocker hides;
    - an unconfirmed pause does not suspend enforcement;
@@ -42,7 +42,7 @@ With a channel, the gate can reach `COMPLETE`, and the Stop hook can release the
 
 ## Limits
 
-This is not a security boundary. An agent that forges hook payloads, drives the hook module directly, or edits state files by hand is outside it. The matcher covers the usual invocations, not every possible program, and anything it misses is recorded unconfirmed. See `references/security.md`.
+This is not a security boundary. An agent that forges hook payloads, drives the hook module directly, or edits state files by hand is outside it. The matcher covers the usual invocations, not every possible program, and anything it misses is recorded unconfirmed: a missed prompt fails safe. Shell segments that only mention the words (`echo`, `grep`, `git log --grep`) are not asked about, unless their text is piped into an interpreter. See `references/security.md`.
 
 ## Enforcing tests
 
