@@ -10,6 +10,8 @@ Resilience. A stored `COMPLETE` is final for the hooks, so a finished assignment
 
 Freedom. Work items are optional: a check may map straight to its requirement. A work item's status is a progress note. The gate reads evidence, so `work set --status verified` is no longer a required step, though planned work still needs its own evidence or a recorded supersede. `check add|edit --approve NOTE` authors and approves in one call, and any later edit still clears the approval. `dmd attempt` takes any R/W/A/F ID. SKILL.md is rewritten from 204 to about 120 lines. It opens with the contract the gate enforces and the freedoms the agent has, then gives five steps with completion criteria, covers non-code deliverables, and moves runtime history into the references.
 
+Also fixed: a timed-out or cancelled check stopped reading output one poll after SIGTERM, so the documented two-second cleanup window captured nothing slower than about 0.1 s. It now reads through the grace period. The timeout-cleanup test now traps TERM and passes under dash, where 0.6.0 had 278/279 on Debian. An approval binds the interpreter by major.minor, so a Python patch upgrade no longer expires every approval; approvals recorded in the old full-version form are still honoured. Command output is printed only after its mutation is saved. Check and work history, review log, recovery records and attempt histories are capped at 50 entries (the evidence files and `events.jsonl` keep everything). Unused imports were removed.
+
 Renamed: the `summary.checks.unapproved` bucket is `edited`, which is what it always held. A work item's reason reads `W-01: checks owed: A-01` in place of the status-based wording.
 
 ## 0.6.0 — 2026-09-13

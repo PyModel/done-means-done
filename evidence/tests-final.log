@@ -169,6 +169,7 @@ test_watchdog_release_names_the_session (test_hardening.IsolationCase.test_watch
 test_missing_cwd_is_a_clean_spawn_failure (test_hardening.RunnerEdgeCase.test_missing_cwd_is_a_clean_spawn_failure) ... ok
 test_non_utf8_output_near_the_limit_is_not_a_failure (test_hardening.RunnerEdgeCase.test_non_utf8_output_near_the_limit_is_not_a_failure) ... ok
 test_output_exactly_at_the_limit_is_not_a_failure (test_hardening.RunnerEdgeCase.test_output_exactly_at_the_limit_is_not_a_failure) ... ok
+test_slow_cleanup_output_is_read_through_the_grace_period (test_hardening.RunnerEdgeCase.test_slow_cleanup_output_is_read_through_the_grace_period) ... ok
 test_spawn_failure_does_not_wedge_the_ledger (test_hardening.RunnerEdgeCase.test_spawn_failure_does_not_wedge_the_ledger) ... ok
 test_timeout_gives_cleanup_handlers_a_chance (test_hardening.RunnerEdgeCase.test_timeout_gives_cleanup_handlers_a_chance) ... ok
 test_all_requirements_removed_not_success (test_model.ModelCase.test_all_requirements_removed_not_success) ... ok
@@ -303,7 +304,7 @@ test_watchdog_releases_the_stop_but_never_the_obligations (test_runtime.RuntimeC
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 302 tests in 88.189s
+Ran 303 tests in 76.628s
 
 OK
-DMD_TESTS_PASS:302;skipped=0
+DMD_TESTS_PASS:303;skipped=0

@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from .storage import DmdError, lock, read_json, save, evidence
 import json
-from .model import new_id, validation_errors
+from .model import new_id
 
 def migrate(args):
     from .cli import create_task, require_text

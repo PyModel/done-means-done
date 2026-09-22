@@ -192,8 +192,14 @@ class RunnerEdgeCase(DmdFixture):
     def test_missing_cwd_is_a_clean_spawn_failure(self):
         self.c.update(cwd=str(self.home / "gone")); r = execute(self.c); self.assertEqual(r["failure"], "SPAWN_FAILED"); self.assertIn("gone", r["output"])
     def test_timeout_gives_cleanup_handlers_a_chance(self):
-        self.c.update(command='trap "echo BYE" EXIT; sleep 10', timeout=0.3); r = execute(self.c)
+        # `trap … TERM` makes the cleanup portable: dash (Debian's /bin/sh) skips an EXIT
+        # trap on SIGTERM unless TERM itself is trapped.
+        self.c.update(command='trap "echo BYE" EXIT; trap "exit 143" TERM; sleep 10', timeout=0.3); r = execute(self.c)
         self.assertEqual(r["failure"], "TIMEOUT"); self.assertIn("BYE", r["output"])
+    def test_slow_cleanup_output_is_read_through_the_grace_period(self):
+        # 0.6.0 stopped reading one poll after SIGTERM, so a cleanup slower than ~0.1 s lost its output.
+        self.c.update(command='trap "sleep 0.5; echo SLOW_BYE" EXIT; trap "exit 143" TERM; sleep 10', timeout=0.3); r = execute(self.c)
+        self.assertEqual(r["failure"], "TIMEOUT"); self.assertIn("SLOW_BYE", r["output"])
     def test_spawn_failure_does_not_wedge_the_ledger(self):
         self.setup_task(); shutil.rmtree(self.repo); self.repo.mkdir()
         # cwd exists again but verify.py is gone: an ordinary FAIL. Now remove the cwd of the check entirely.

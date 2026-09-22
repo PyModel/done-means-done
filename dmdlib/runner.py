@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 from .model import check_definition
 from .storage import DmdError, digest
-from .source import fingerprint
 
 SHELL = str(Path("/bin/sh").resolve())
 # How long to keep reading after the command exits, for output its descendants still hold.
@@ -19,10 +18,13 @@ DRAIN_SECONDS = 2.0
 # handlers (containers, temp dirs, DB rows) get a chance to run.
 TERM_GRACE_SECONDS = 2.0
 
-def approval_parts(c):
+def approval_parts(c, legacy=False):
     """The approval is split so an expired one can say exactly what changed.
     PATH and interpreter stay in scope: approving `pytest` must not approve a
-    different `pytest` resolved later from a different PATH."""
+    different `pytest` resolved later from a different PATH. The interpreter is
+    identified by major.minor: a patch upgrade of the Python running dmd changes
+    nothing a check executes. `legacy` reproduces the pre-0.7.0 full-version form
+    so approvals recorded before the upgrade stay valid."""
     inputs = []
     for p in c.get("inputs", []):
         path = Path(p)
@@ -34,10 +36,14 @@ def approval_parts(c):
     return {"definition": digest(check_definition(c)),
             "inputs": digest(inputs),
             "environment": digest({"shell": SHELL, "path": os.environ.get("PATH", ""),
-                                   "platform": sys.platform, "python": sys.version})}
+                                   "platform": sys.platform,
+                                   "python": sys.version if legacy else "%d.%d" % sys.version_info[:2]})}
 
-def approval_signature(c):
-    return digest(approval_parts(c))
+def approval_signature(c, legacy=False):
+    return digest(approval_parts(c, legacy))
+
+def approval_current(c, recorded_signature):
+    return recorded_signature in (approval_signature(c), approval_signature(c, legacy=True))
 
 def approval_drift(c, recorded):
     """Name the components that moved since approval, most actionable first."""
@@ -147,7 +153,9 @@ def execute(c, cancelled=lambda: False):
                     if total > limit:
                         failure = "OUTPUT_LIMIT"; break
                 chunks[name].extend(data)
-            if failure:
+            # A timeout or cancel keeps reading through the grace period (bounded above), so
+            # cleanup output lands in the evidence; only a capture failure stops at once.
+            if failure and failure not in ("TIMEOUT", "CANCELLED"):
                 break
     except BaseException:
         failure = "INTERRUPTED"

@@ -104,7 +104,10 @@ Trigger: an architecture review and a correctness/gaming review of 0.6.0. Every 
 | RunnerSurvivesItsParent: SIGTERM to `dmd run` exits 130, terminates the check and records the interruption (0.6.0: exit -15, check kept running); SIGKILL of the runner still stops the check within the grace period (0.6.0: orphaned) | All pass |
 | LessCeremonySameGuarantees / NoCheapExits / VolatileSource: one-call author-and-approve completes a task with no work items; an edit still forces reinspection; a confirmed finding needs an accepted executed check to be disproved; `req cancel` refuses to strand work; a stuck plan yields an action; a never-settling file is `volatile` drift with other files hashed as before | All pass |
 | Fingerprint compatibility: `source.fingerprint` of two unchanged trees computed by the 0.6.0 and 0.7.0 modules | Identical digests |
-| Full suite | `DMD_TESTS_PASS:302;skipped=0`, [transcript](tests-final.log) |
+| RunnerEdgeCase: slow cleanup output is read through the grace period (0.6.0 runner: output lost); the timeout-cleanup test traps TERM and passes under dash | All pass |
+| Full suite, macOS Python 3.14.7 and 3.10 | `DMD_TESTS_PASS:303;skipped=0`, [transcript](tests-final.log) |
+| Full suite, Linux (Docker `python:3.10`, Debian, `/bin/sh` = dash) | `DMD_TESTS_PASS:303;skipped=0` (0.6.0: 278/279) |
+| Real state on this machine: all 28 recorded tasks loaded and gated read-only by 0.6.0 and 0.7.0 code | Identical verdict distribution (22 ACTIVE, 4 PAUSED, 1 COMPLETE, 1 with a missing root); no load errors |
 
 Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7). Live Claude Code host integration was not re-tested for this release.
 

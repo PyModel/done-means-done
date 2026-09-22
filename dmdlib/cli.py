@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import contextlib
+import io
 import json
 import os
 import signal
@@ -12,11 +13,11 @@ import uuid
 from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
-from .source import candidate_root, drift, git_root, identity, recent_writes, MissingCandidate
-from .model import (SCHEMA, FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, accepted, acceptance_reason, attested, check_candidate, check_definition, legacy_receipt, missing_inputs,
+from .source import candidate_root, drift, git_root, identity, recent_writes
+from .model import (SCHEMA, FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, acceptance_reason, attested, check_candidate, check_definition, legacy_receipt, missing_inputs,
                     contract_digest, gate, get, live, new_id, repeated_attempts, review_signature, source_digest,
                     source_for, task_fingerprint, task_snapshot, validation_errors, work_ok)
-from .runner import approval_drift, approval_parts, approval_signature, execute, SHELL
+from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
 
 QUIET_WINDOW_SECONDS = 3.0
 # Longest a run will wait for a fresh write to settle before refusing outright.
@@ -109,14 +110,36 @@ def edit(args, kind):
         if t["state"] == "CANCELLED" and kind not in ("state",):
             raise DmdError("task is cancelled; explicit operator-authorized reactivation is required")
         before = contract_digest(t)
-        yield directory, t
+        # A handler's confirmation is printed only once the mutation is saved, never for a
+        # change that validation then rejects.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            yield directory, t
         if t["state"] == "COMPLETE" and contract_digest(t) != before:
             # New or changed obligations reopen a finished task, so the hooks govern it again.
             t["state"] = "ACTIVE"
         errors = validation_errors(t)
         if errors:
             raise DmdError("; ".join(errors))
+        cap_histories(t)
         save(directory, t, kind)
+    sys.stdout.write(out.getvalue())
+
+
+# Audit lists a long task keeps appending to. Every evidence file stays on disk and
+# events.jsonl keeps the full sequence; the record keeps the recent tail.
+MAX_HISTORY = 50
+
+def cap_histories(t):
+    for row in t["checks"] + t["work"]:
+        if len(row.get("history") or []) > MAX_HISTORY:
+            del row["history"][:-MAX_HISTORY]
+    for key in ("review_log", "recovery"):
+        if len(t.get(key) or []) > MAX_HISTORY:
+            del t[key][:-MAX_HISTORY]
+    for history in (t.get("attempts") or {}).values():
+        if len(history) > MAX_HISTORY:
+            del history[:-MAX_HISTORY]
 
 
 def bind_session(directory, session):
@@ -624,7 +647,7 @@ def _run(args):
                     raise DmdError(f"{c['id']}: only fully authored, live command checks can run")
                 signature = approval_signature(c)
                 recorded = t["approvals"].get(c["id"]) or {}
-                if recorded.get("signature") != signature:
+                if not approval_current(c, recorded.get("signature")):
                     drifted = approval_drift(c, recorded.get("parts"))
                     raise DmdError(f"{c['id']} has no current inspected approval: " + "; ".join(drifted) +
                                    f". Re-inspect and run: dmd approve {c['id']} --note '<what you inspected>'")
