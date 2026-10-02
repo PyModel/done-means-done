@@ -4,7 +4,7 @@ from pathlib import Path
 import hashlib
 import json
 from .storage import DmdError, lock, read_json, save, evidence
-from .model import new_id
+from .model import SUSPENDED, new_id
 from .store import create_task, require_text, task_records
 
 # Methods a schema-2 check can carry. A legacy method outside this set is imported as a
@@ -76,7 +76,7 @@ def migrate(args):
         for u in old.get("uncertain", []):
             if not u.get("resolved"):
                 t["uncertain"].append({"id": new_id(t["uncertain"], "U"), "text": u.get("text") or "Reconcile interrupted legacy operation", "resolved": False})
-        if old.get("status") in ("PAUSED", "CANCELLED"):
+        if old.get("status") in SUSPENDED:
             t["state"] = old["status"]
         t["amendments"] = old.get("amendments", [])
     def guarded(t):

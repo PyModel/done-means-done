@@ -67,13 +67,13 @@ def sections(directory, t, g):
     out["checks"] = lines
     lines = ["## Findings (all severities and origins)"]
     for f in t["findings"]:
-        lines.append(f"- {f['id']} [{f['status']}; {f['origin']}] {f['location']}: {f['text']}; {f.get('note', '')}")
+        lines.append(f"- {f['id']} [{f['status']}; {f.get('origin') or 'unknown'}] {f['location']}: {f['text']}; {f.get('note', '')}")
     out["findings"] = lines
     lines = ["## Blockers and external outcomes"]
     for b in t["blockers"]:
-        lines.append(f"- {b['id']} [{'resolved' if b['resolved'] else 'OPEN'}] {b['text']}; unblock: {b['unblock']}; owner: {b['owner']}")
+        lines.append(f"- {b['id']} [{'resolved' if b.get('resolved') else 'OPEN'}] {b['text']}; unblock: {b['unblock']}; owner: {b['owner']}")
     for u in t["uncertain"]:
-        lines.append(f"- {u['id']} [{'resolved' if u['resolved'] else 'UNKNOWN'}] {u['text']}")
+        lines.append(f"- {u['id']} [{'resolved' if u.get('resolved') else 'UNKNOWN'}] {u['text']}")
     out["blockers"] = lines
     out["decisions"] = []
     if t.get("authority"):

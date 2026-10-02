@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Resilience and one module boundary. Found by a full read of the runtime after 0.7.1; nothing here changes the contract the gate enforces.
+
+- **The verification run is its own module.** `dmdlib/runs.py` owns selecting the checks, the concurrent-writer preflight, named-resource locks, the fingerprint window, execution and the receipts; `cli.py` only resolves the task directory and hands over the arguments (ADR 0004). Behaviour is unchanged; the suite was identical before and after the move.
+- **The tree is observed outside the task lock.** The Stop and SessionStart hooks, `dmd gate`/`status`, and both snapshots of a run used to hash the project tree while holding the record lock. On a large checkout that lock was held for seconds, and `dmd run` (which takes it for 5 s at start and finish) lost its results when a hook happened to be hashing. Fingerprinting now runs before the lock; the lock is held only to read or write the record. The run's finish block waits up to 60 s for it, because executed evidence is at stake.
+- **A run's finish path cannot strand its results.** A check that removed its own candidate tree (a scratch worktree), or whose declared `--input` vanished, raised inside the finish block: the receipts were lost and `running` stayed set until `recover-run`. Both are now drift: the run is recorded `STALE` and the record is released. `running` is cleared only when it is this run's own record, and an interrupt under a contended lock still exits 130 with the run left recorded for `recover-run`.
+- **Hooks fail open where they did not.** The hook entry point resolved the process cwd before its error boundary, so a deleted working directory (the 0.5.x scratchpad class) produced a traceback and a nonzero exit; hooks never needed it and the CLI now resolves it lazily. Two processes creating the same state directory at once no longer fail with `FileExistsError`. A contended session-prune lock no longer fails the session binding. A corrupt session binding is dropped and the task at the cwd governs, instead of "could not evaluate".
+- **Validation treats a JSON null as missing text.** Ten required-text checks spelled `str(x.get("key", "")).strip()`, which turns `null` into the truthy string `"None"`. One helper owns the rule now, and a regression check's `red_exit` is type-checked rather than compared blindly.
+- `relocate` refuses while a run is recorded as running (it used to delete the directory the runner would reload) and moves the worktree's session bindings to the new record.
+- `check add` without `--req` says so, like `work add`. `work set` builds one assessment for all dependencies instead of one per dependency. The suspended and finished state sets have one owner (`model.SUSPENDED`, `model.FINISHED`), the session-ID bound one (`store.valid_session`), and the unused `OPEN_FINDING_STATES` is gone. The report no longer hard-indexes optional finding and blocker keys.
+
+Not done here: a version bump. `SHA256SUMS`, `SOURCE.json` and `evidence/VALIDATION.md` form the release step and are regenerated with it.
+
 ## 0.7.1 — 2026-09-22
 
 Housekeeping. Found while cleaning the state root of a machine running 0.6.0 and 0.7.0.

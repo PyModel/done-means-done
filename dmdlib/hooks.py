@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 from .storage import DmdError, append_line, atomic, digest, lock, now, private_dir, read_json, safe_text, save
-from .model import check_candidate, effective_state, evaluate, live, task_fingerprint
+from .model import SUSPENDED, check_candidate, effective_state, evaluate, live, task_fingerprint
 from . import authority
 from .source import identity
 from .store import (StateInsideProject, bind_session, binding_path, load_config, load_task, locate, remember_session,
@@ -60,10 +60,6 @@ def related(task, directory, cwd):
         return lookup(cwd) in (None, directory)
     except (DmdError, OSError):
         return False
-
-
-def finished(directory):
-    return load_task(directory)["state"] == "COMPLETE"
 
 
 def activity(directory, event, payload):
@@ -121,7 +117,6 @@ def ask_operator(root, payload, session, mode):
 def decisions_named(payload, session):
     """For `dmd authority confirm AU-XX`, the decisions themselves, so the operator is not
     asked to approve an opaque ID."""
-    import re
     wanted = re.findall(r"\bAU-\d+\b", str((payload.get("tool_input") or {}).get("command") or ""))
     if not wanted:
         return ""
@@ -223,11 +218,16 @@ def _handle(args):
         record_approval(root, payload, session)
         if quick_activity(root, binding, cwd, payload, args.event):
             return 0
+    task = None
     if binding.exists():
-        d = Path(read_json(binding)["task_dir"])
-        if not d.is_absolute() or not d.resolve().is_relative_to((root / "v2").resolve()):
-            raise DmdError("invalid session task binding")
-        if not (d / "task.json").is_file():
+        try:
+            d = Path(read_json(binding)["task_dir"])
+            if not d.is_absolute() or not d.resolve().is_relative_to((root / "v2").resolve()):
+                raise DmdError("binding points outside the state root")
+        except (DmdError, OSError, KeyError, TypeError, ValueError):
+            # A corrupt binding governs nothing; the task at the cwd is found again below.
+            d = None
+        if d is None or not (d / "task.json").is_file():
             # The bound task was removed. A dead pointer must not govern anything.
             binding.unlink(missing_ok=True)
         else:
@@ -252,21 +252,27 @@ def _handle(args):
                 binding.unlink(missing_ok=True)
                 notice = (f"Done Means Done: session was bound to task {safe_text(task['task_id'], 96)} in {safe_text(task['root'], 300)}; "
                           f"this worktree is {safe_text(cwd, 300)}, so that binding was released.")
+                task = None
     if directory is None:
         directory = lookup(cwd)
-        if directory and finished(directory):
-            return 0
-        if directory:
-            bind_session(directory, session)
+        if directory is not None:
+            task = load_task(directory)
+            if task["state"] != "COMPLETE":
+                bind_session(directory, session)
         elif notice:
             print(json.dumps({"systemMessage": notice + " No task is active here."}))
-    if directory is None or finished(directory):
+    if directory is None or task["state"] == "COMPLETE":
         # A finished assignment is not this session's work: no binding, no bookkeeping,
         # no enforcement. A contract change reopens it through the CLI, not a hook.
         return 0
     if args.event in ("post-tool-use", "post-tool-failure"):
         activity(directory, args.event, payload)
         return 0
+    # A suspended task is never fingerprinted by a hook: its declared inputs may be gone
+    # (a deleted session scratchpad), and the gate answers without them. The tree is read
+    # before the lock: a snapshot of a large checkout takes seconds, and `dmd run` must be
+    # able to write its receipts meanwhile.
+    fp = None if effective_state(task) in SUSPENDED else task_fingerprint(task)
     with lock(directory):
         task = load_task(directory)
         remember_session(task, session)
@@ -274,11 +280,8 @@ def _handle(args):
             # Finished is final for the hooks. A later session in this worktree is not the
             # assignment; a contract change (amend, new requirement) reopens it explicitly.
             return 0
-        suspended = effective_state(task) in ("PAUSED", "CANCELLED")
-        # A suspended task is never fingerprinted by a hook: its declared inputs may be
-        # gone (a deleted session scratchpad), and the gate answers without them.
-        fp = None if suspended else task_fingerprint(task)
-        g, a = evaluate(directory, task, fp)
+        suspended = effective_state(task) in SUSPENDED
+        g, a = evaluate(directory, task, None if suspended else fp)
         if not suspended:
             atomic(directory / "handoff.md", render(directory, task, g))
         if notice and args.event != "session-start":

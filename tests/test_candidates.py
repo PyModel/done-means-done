@@ -198,7 +198,7 @@ class BatchCase(GitFixture):
 
     def test_batch_snapshots_each_candidate_once(self):
         self.setup_task(); self.second_check()
-        with patch("dmdlib.cli.task_snapshot", wraps=__import__("dmdlib.model", fromlist=["task_snapshot"]).task_snapshot) as snap:
+        with patch("dmdlib.runs.task_snapshot", wraps=__import__("dmdlib.model", fromlist=["task_snapshot"]).task_snapshot) as snap:
             self.cmd("run", "--all", *QUIET)
         self.assertEqual(snap.call_count, 2)
 
@@ -208,7 +208,7 @@ class BatchCase(GitFixture):
         real = __import__("dmdlib.runner", fromlist=["execute"]).execute
         def spy(c, cancelled=lambda: False):
             seen.setdefault("running", load_task(locate(self.repo))["running"]); return real(c, cancelled)
-        with patch("dmdlib.cli.execute", spy):
+        with patch("dmdlib.runs.execute", spy):
             self.cmd("run", "A-01", cid, *QUIET)
         self.assertEqual(seen["running"]["checks"], ["A-01", cid]); self.assertEqual(seen["running"]["pid"], os.getpid())
 

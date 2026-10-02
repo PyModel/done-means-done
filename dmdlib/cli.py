@@ -7,31 +7,23 @@ import io
 import json
 import os
 import re
-import signal
 import socket
 import sys
-import time
-import uuid
 from pathlib import Path
 from . import __version__
-from .storage import DmdError, atomic, digest, evidence, ident, lock, now, private_dir, read_json, redact, save
-from .source import candidate_root, drift, file_digest, git, location_file, output_match, recent_writes
-from .model import (FINDING_STATES, OPERATOR_FINDING_STATES, WORK_STATES, acceptance_reason, attested, check_candidate, check_definition, missing_inputs,
-                    candidate_outputs, contract_digest, extract_clauses, gate, get, live, unmapped_clauses, new_id, repeated_attempts, review_signature, source_digest,
-                    source_for, task_fingerprint, task_snapshot, work_ok)
-from .runner import approval_current, approval_drift, approval_parts, approval_signature, execute, SHELL
-from .store import (StateInsideProject, prune_empty_record_dirs, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate, other_runs,
-                    DEFAULT_CONFIG, authority_channel, prune_run_index, prune_tickets, index_run, pid_alive, prune_sessions, remember_session, unindex_run, withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
+from .storage import DmdError, atomic, digest, evidence, ident, lock, now, read_json, redact, save
+from .source import candidate_root, file_digest, git, location_file, output_match
+from .model import (FINDING_STATES, FINISHED, OPERATOR_FINDING_STATES, SUSPENDED, WORK_STATES, acceptance_reason, assess, attested, check_candidate, effective_state,
+                    check_definition, missing_inputs, contract_digest, extract_clauses, gate, get, live, unmapped_clauses, new_id, repeated_attempts,
+                    review_signature, source_digest, source_for, task_fingerprint)
+from .source import MissingCandidate
+from .runner import approval_parts, SHELL
+from .runs import run_checks
+from .store import (prune_empty_record_dirs, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate,
+                    DEFAULT_CONFIG, authority_channel, prune_run_index, prune_tickets, pid_alive, prune_sessions, rebind_sessions, remember_session, unindex_run,
+                    withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
 from .authority import effective, find, record, terminal_confirms, withdraw as authority_withdraw
-
-QUIET_WINDOW_SECONDS = 3.0
-# Longest a run will wait for a fresh write to settle before refusing outright.
-SETTLE_SECONDS = 3.0
-# Bounded run history per check; every run's evidence file stays on disk.
-MAX_RUNS_PER_CHECK = 50
-EXCLUSIVE_WAIT_SECONDS = 600.0
-
 
 def need(args):
     directory = locate(args.cwd, args.task)
@@ -249,7 +241,8 @@ def work(args):
                 if w.get("removed"):
                     raise DmdError(f"{w['id']} is superseded; add a replacement work item instead")
                 fp = task_fingerprint(t)
-                if args.status in ("doing", "verified") and any(not work_ok(directory, t, get(t["work"], d), fp) for d in w["deps"]):
+                a = assess(directory, t, fp)
+                if args.status in ("doing", "verified") and any(not a.work_ok(d) for d in w["deps"]):
                     raise DmdError("dependencies must have current verification before work starts/closes")
                 if args.status == "verified":
                     cs = [c for c in live(t["checks"]) if w["id"] in c["work"]]
@@ -278,6 +271,8 @@ def check(args):
             return
         if args.action in ("add", "edit"):
             if args.action == "add":
+                if not args.req:
+                    raise DmdError("--req is required and must name an existing requirement (R-XX); see dmd req list")
                 cid = new_id(t["checks"], "A")
                 c = {"id": cid, "req": args.req, "work": args.work or [], "method": args.method or "command",
                      "command": args.cmd, "cwd": str(Path(args.run_cwd or t["root"]).resolve()),
@@ -400,241 +395,8 @@ def preview(args):
                       "instruction": "Inspect the command and every called script. Approval is an operator-authorized action, not implied by a ledger."}, indent=2))
 
 
-def preflight(t, checks, window):
-    """Refuse a run that would test a tree someone is still writing. Cheaper than burning
-    an integration run and rejecting its receipt afterwards."""
-    candidates = sorted({check_candidate(c, t["root"]) for c in checks})
-    problems = []
-    outputs = candidate_outputs(t)
-    for cand in candidates:
-        writes = recent_writes(cand, window, outputs.get(cand, ()))
-        if writes:
-            # The normal agent turn is edit-then-verify. Wait (bounded by SETTLE_SECONDS)
-            # for the newest write to age past the window, then re-check; refuse only a
-            # tree still being written.
-            wait = window - writes[0]["age_s"]
-            if 0 < wait <= SETTLE_SECONDS:
-                time.sleep(wait + 0.05)
-                writes = recent_writes(cand, window, outputs.get(cand, ()))
-        if writes:
-            named = ", ".join(f"{w['path']} ({w['age_s']}s ago)" for w in writes[:5])
-            more = f" and {len(writes) - 5} more" if len(writes) > 5 else ""
-            problems.append(f"concurrent writer: {cand} has dirty files modified within {window:g}s: {named}{more}")
-    for r in other_runs(t["task_id"], candidates):
-        state = {True: "is alive", False: "is not alive; recover it there with dmd recover-run", None: "is on another host"}[r["alive"]]
-        problems.append(f"another dmd run ({r['task_id']} check {r['check']}, pid {r['pid']}) holds {', '.join(r['candidates'])}; that runner {state}")
-    if problems:
-        raise DmdError("; ".join(problems) + f". Wait for the writer to finish, or rerun with --quiet-window 0 to skip the dirty-file check")
-    return candidates
-
-
-@contextlib.contextmanager
-def exclusive(tags, wait):
-    """Serialize checks that share a named resource (a database, a port) across every task,
-    worktree and session on this machine. Tags are taken in sorted order so two checks
-    sharing several never deadlock."""
-    directory = private_dir(state_root() / "locks")
-    with contextlib.ExitStack() as stack:
-        for tag in sorted(set(tags)):
-            try:
-                stack.enter_context(lock(directory, ident(tag) + ".lock", wait=wait))
-            except DmdError as exc:
-                raise DmdError(f"exclusive resource '{tag}' is held by another check: {exc}") from exc
-        yield
-
-
-def select_checks(t, ids, everything):
-    if everything and ids:
-        raise DmdError("give check IDs or --all, not both")
-    if everything:
-        checks = [c for c in live(t["checks"]) if c["method"] == "command" and not c.get("needs_review")]
-        if not checks:
-            raise DmdError("no runnable command checks")
-        return checks
-    if not ids:
-        raise DmdError("name at least one check ID, or use --all")
-    if len(ids) != len(set(ids)):
-        raise DmdError("duplicate check IDs in one run")
-    return [get(t["checks"], cid) for cid in ids]
-
-
-@contextlib.contextmanager
-def interruptible():
-    """SIGTERM and SIGHUP (a host tool timeout, a closed terminal) take the same path as
-    Ctrl-C: the check's process group is terminated and the run is recorded as interrupted,
-    instead of the runner dying and leaving the check executing unsupervised."""
-    def stop(signum, frame):
-        raise KeyboardInterrupt(f"signal {signum}")
-    previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGHUP)}
-    try:
-        yield
-    finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
-
-
 def run(args):
-    with interruptible():
-        return _run(args)
-
-
-def _run(args):
-    directory = need(args)
-    with lock(directory, ".run.lock"):
-        with lock(directory):
-            t = load_task(directory)
-            if t["state"] in ("PAUSED", "CANCELLED"):
-                raise DmdError("execution is suspended; operator-authorized activation required")
-            if t.get("running"):
-                raise DmdError("previous run has an unknown outcome; use recover-run after inspecting it")
-            checks = select_checks(t, args.ids, args.all)
-            plan = []
-            for c in checks:
-                if c["method"] != "command" or c.get("needs_review") or c.get("removed"):
-                    raise DmdError(f"{c['id']}: only fully authored, live command checks can run")
-                signature = approval_signature(c)
-                recorded = t["approvals"].get(c["id"]) or {}
-                if not approval_current(c, recorded.get("signature")):
-                    drifted = approval_drift(c, recorded.get("parts"))
-                    raise DmdError(f"{c['id']} has no current inspected approval: " + "; ".join(drifted) +
-                                   f". Re-inspect and run: dmd approve {c['id']} --note '<what you inspected>'")
-                if args.red and (not c.get("regression") or not c.get("red_match")):
-                    raise DmdError(f"{c['id']}: --red requires a regression check with an intentional failure match")
-                plan.append((c, signature, digest(check_definition(c))))
-            window = QUIET_WINDOW_SECONDS if args.quiet_window is None else args.quiet_window
-            candidates = preflight(t, checks, window)
-            # One fingerprint window for the whole list: snapshot every candidate once here,
-            # once after the last check. Receipts bind to the start state; drift is diffed.
-            before = task_snapshot(t)
-            fps = {path: snap["fingerprint"] for path, snap in before.items()}
-            token = uuid.uuid4().hex
-            t["running"] = {"token": token, "checks": [c["id"] for c in checks], "check": checks[0]["id"],
-                            "started": now(), "source": fps, "candidates": candidates,
-                            "pid": os.getpid(), "host": socket.gethostname(), "red": bool(args.red)}
-            save(directory, t, "run.start", checks=[c["id"] for c in checks], red=args.red)
-            index_run(directory, t["running"])
-        poll = {"at": 0.0, "value": False}
-        def cancelled():
-            # Re-read at most once per second; a transient read failure is not a cancel.
-            if time.monotonic() - poll["at"] < 1.0:
-                return poll["value"]
-            poll["at"] = time.monotonic()
-            try:
-                current = read_json(directory / "task.json")
-            except (DmdError, OSError):
-                return poll["value"]
-            poll["value"] = current.get("state") in ("PAUSED", "CANCELLED") or (current.get("running") or {}).get("token") != token
-            return poll["value"]
-        results = []
-        refused = None
-        try:
-            for index, (c, _, _) in enumerate(plan):
-                if index:
-                    with lock(directory):
-                        t = load_task(directory)
-                        if (t.get("running") or {}).get("token") == token:
-                            t["running"]["check"] = c["id"]
-                            save(directory, t, "run.next", check=c["id"])
-                wait = EXCLUSIVE_WAIT_SECONDS if args.wait_exclusive is None else args.wait_exclusive
-                try:
-                    holder = exclusive(c.get("exclusive") or [], wait)
-                    holder.__enter__()
-                except DmdError as exc:
-                    # Nothing ran for this check: a held resource is a clean refusal, not an
-                    # interrupted run. Earlier results in the list are kept.
-                    refused = f"{c['id']}: {exc}"
-                    break
-                # Progress goes to stderr so stdout stays one JSON row per result; a
-                # watcher can tell a 20-minute integration run from a hang.
-                print(json.dumps({"check": c["id"], "event": "start", "candidate": check_candidate(c, t["root"]),
-                                  "timeout": c["timeout"], "at": now()}), file=sys.stderr, flush=True)
-                try:
-                    results.append(execute(c, cancelled))
-                finally:
-                    holder.__exit__(None, None, None)
-                print(json.dumps({"check": c["id"], "event": "finish", "exit": results[-1]["exit"],
-                                  "duration_s": results[-1]["duration_s"], "failure": results[-1]["failure"]}), file=sys.stderr, flush=True)
-                if results[-1]["failure"] == "CANCELLED":
-                    break
-        except BaseException:
-            # The supervisor has cleaned up its local process group. Preserve
-            # interrupted evidence as unknown, never silently retry external effects.
-            with lock(directory):
-                t = load_task(directory)
-                if (t.get("running") or {}).get("token") == token:
-                    t["running"]["interrupted"] = True
-                    save(directory, t, "run.interrupted", checks=[c["id"] for c, _, _ in plan], completed=len(results))
-            raise
-        with lock(directory):
-            t = load_task(directory)
-            after = task_snapshot(t)
-            moved = {path: drift(before[path], after[path]) for path in before if path in after and before[path]["fingerprint"] != after[path]["fingerprint"]}
-            suspended = (t.get("running") or {}).get("token") != token or t["state"] in ("PAUSED", "CANCELLED")
-            summary = []
-            all_ok = True
-            for (c, signature, definition), result in zip(plan, results):
-                current = get(t["checks"], c["id"])
-                cand = check_candidate(c, t["root"])
-                candidate_drift = moved.get(cand) or next((moved[p] for p in moved if Path(p) in Path(cand).parents), None)
-                definition_changed = digest(check_definition(current)) != definition or approval_signature(current) != signature
-                changed = suspended or definition_changed or candidate_drift is not None
-                failure = result["failure"] or ("CANDIDATE_OR_DEFINITION_CHANGED" if changed else None)
-                match = c["red_match"] if args.red else c["match"]
-                matched = bool(match and match in result["output"])
-                expected_exit = c["red_exit"] if args.red else 0
-                ran_ok = result["exit"] == expected_exit and matched and result["failure"] is None
-                success = ran_ok and failure is None
-                # A command that passed against a tree that then moved is STALE, not FAILED:
-                # the receipt is rejected, and the reader learns what moved without opening
-                # the evidence file.
-                stale = ran_ok and changed
-                reason = None
-                if stale:
-                    reason = {"suspended": suspended, "definition_changed": definition_changed, "candidate": cand, "drift": candidate_drift}
-                metadata = {k: v for k, v in result.items() if k != "output"}
-                art = evidence(directory, json.dumps({"check": c["id"], "definition": check_definition(c),
-                                                     "candidate": cand, "head": before[cand]["head"] if cand in before else None,
-                                                     "source": fps.get(cand), "started": (t.get("running") or {}).get("started"),
-                                                     "metadata": metadata, "stale": reason}, indent=2) + "\n\n" + result["output"], "command")
-                receipt = {"kind": "command", "source": source_for(fps, c), "candidate": cand,
-                           "head": before[cand]["head"] if cand in before else None,
-                           "definition": definition, "artifact": art,
-                           "exit": result["exit"], "matched": matched, "failure": failure,
-                           "background_holders": result["background_holders"],
-                           "duration_s": result["duration_s"], "at": now()}
-                if stale:
-                    receipt["stale"] = reason
-                if args.red:
-                    current["red"] = receipt if success else None
-                    label = "RED-OK" if success else ("RED-STALE" if stale else "RED-INVALID")
-                else:
-                    current["status"] = "PASS" if success else "FAIL"
-                    current["receipt"] = receipt
-                    label = "PASS" if success else ("STALE" if stale else "FAIL")
-                runs = current.setdefault("runs", [])
-                runs.append({"at": now(), "red": args.red, "artifact": art, "result": label})
-                if len(runs) > MAX_RUNS_PER_CHECK:
-                    del runs[:-MAX_RUNS_PER_CHECK]
-                all_ok = all_ok and success
-                row = {"check": c["id"], "result": label, "exit": result["exit"], "matched": matched,
-                       "failure": failure, "duration_s": result["duration_s"], "candidate": cand,
-                       "head": receipt["head"], "evidence": str(directory / art["path"])}
-                if stale:
-                    row["stale"] = reason
-                summary.append(row)
-            skipped = [c["id"] for c, _, _ in plan[len(results):]]
-            t["running"] = None
-            unindex_run(token)
-            save(directory, t, "run.finish", results=[(r["check"], r["result"]) for r in summary], skipped=skipped)
-        for row in summary:
-            print(json.dumps(row))
-        if len(plan) > 1 or skipped:
-            print(json.dumps({"batch": [r["check"] for r in summary], "skipped": skipped, "refused": refused,
-                              "results": {r["check"]: r["result"] for r in summary},
-                              "window": {"started": fps, "moved": moved}}))
-        if refused:
-            raise DmdError(refused + (f"; {len(summary)} earlier check(s) recorded" if summary else ""))
-        return 0 if all_ok and not skipped else 1
+    return run_checks(need(args), args.ids, args.all, args.red, args.quiet_window, args.wait_exclusive)
 
 
 def finding(args):
@@ -693,7 +455,6 @@ def finding(args):
                     f["binding"] = {"files": {p: file_digest(p) for p in files}}
                 else:
                     f["source"] = source_digest(task_fingerprint(t))
-                from .model import assess
                 reason = assess(directory, t, task_fingerprint(t)).findings.get(f["id"])
                 if reason:
                     raise DmdError(reason)
@@ -709,8 +470,7 @@ def finding(args):
                     row = get(t["findings"], cursor)
                     cursor = row.get("duplicate") if row["status"] == "duplicate" else None
             if f["status"] == "fixed-verified":
-                from .model import unresolved_findings
-                reason = unresolved_findings(directory, t, task_fingerprint(t)).get(f["id"])
+                reason = assess(directory, t, task_fingerprint(t)).findings.get(f["id"])
                 if reason:
                     raise DmdError(reason)
             print(f["id"] + " " + f["status"])
@@ -825,21 +585,31 @@ def review(args):
 
 def inspect_task(args):
     directory = need(args)
-    with lock(directory):
-        t = load_task(directory)
-        g = gate(directory, t)
-        if args.command == "gate":
-            if g["status"] in ("ACTIVE", "BLOCKED", "COMPLETE") and t["state"] not in ("PAUSED", "CANCELLED"):
+    t = load_task(directory)
+    # The tree is read before any lock: a snapshot of a large checkout takes seconds, and
+    # a run or hook must be able to write the record meanwhile. A missing candidate is the
+    # gate's to report (BLOCKED), not a reason to fail here.
+    try:
+        fp = None if effective_state(t) in SUSPENDED else task_fingerprint(t)
+    except MissingCandidate:
+        fp = None
+    if args.command == "gate":
+        with lock(directory):
+            t = load_task(directory)
+            g = gate(directory, t, fp)
+            if g["status"] in ("ACTIVE", "BLOCKED", "COMPLETE") and t["state"] not in SUSPENDED:
                 # A stored pause awaiting the operator's confirmation stays recorded as asked.
                 t["state"] = g["status"]
             save(directory, t, "gate", result=g["status"], reason_ids=[x.split(":")[0] for x in g["reasons"]])
-        text = render(directory, t, g)
-        if args.command in ("handoff", "reconcile", "gate"):
-            atomic(directory / "handoff.md", text)
-        if args.command == "report" and args.save:
-            atomic(directory / "report.md", text)
-        if getattr(args, "only", None):
-            text = render(directory, t, g, only=set(args.only))
+    else:
+        g = gate(directory, t, fp)
+    text = render(directory, t, g)
+    if args.command in ("handoff", "reconcile", "gate"):
+        atomic(directory / "handoff.md", text)
+    if args.command == "report" and args.save:
+        atomic(directory / "report.md", text)
+    if getattr(args, "only", None):
+        text = render(directory, t, g, only=set(args.only))
     if args.brief and "source" in g:
         # The map is one line per candidate; a digest identifies the same state in one.
         g = dict(g, source_digest=source_digest(g["source"]), candidates=len(g["source"]))
@@ -1032,7 +802,7 @@ def gc(args):
     empty = prune_empty_record_dirs()
     finished = []
     for directory, t in task_records():
-        if isinstance(t, dict) and t["state"] in ("COMPLETE", "CANCELLED"):
+        if isinstance(t, dict) and t["state"] in FINISHED:
             finished.append({"task_id": t["task_id"], "state": t["state"], "root": t["root"], "path": str(directory)})
     print(json.dumps({"session_bindings_removed": removed, "stale_confirmation_tickets_removed": tickets,
                       "orphaned_run_index_entries_removed": runs, "empty_record_directories_removed": empty, "finished_tasks": finished,
@@ -1055,13 +825,15 @@ def relocate(args):
         if args.task:
             if t["task_id"] == args.task:
                 matches.append(directory)
-        elif t["state"] not in ("COMPLETE", "CANCELLED") and not Path(t["root"]).is_dir():
+        elif t["state"] not in FINISHED and not Path(t["root"]).is_dir():
             matches.append(directory)
     if len(matches) != 1:
         raise DmdError(f"{len(matches)} task(s) matched; name exactly one with --task <id> (dmd list shows roots)")
     old_dir = matches[0]
     with lock(old_dir):
         t = load_task(old_dir)
+        if t.get("running"):
+            raise DmdError("a verification run is recorded as running; wait for it or dmd recover-run before relocating")
         old_root = t["root"]
         if old_root == str(new_root):
             raise DmdError("task already lives at that root")
@@ -1092,6 +864,7 @@ def relocate(args):
         old_marker = old_dir.parent / "active.json"
         if old_marker.exists() and read_json(old_marker).get("task_id") == t["task_id"]:
             old_marker.unlink()
+        rebind_sessions(old_dir, new_dir)
         shutil.rmtree(old_dir)
     print(json.dumps({"task_id": t["task_id"], "from": old_root, "to": str(new_root), "dir": str(new_dir),
                       "note": "all command evidence is now NOT_RUN; approve and rerun checks against the new tree"}))
@@ -1165,7 +938,7 @@ HOOK_EVENTS = ("session-start", "stop", "task-completed", "pre-tool-use", "post-
 def parser():
     p = argparse.ArgumentParser(prog="dmd", description="Persistent obligations, strict remediation, verified completion")
     p.add_argument("--version", action="version", version=__version__)
-    p.add_argument("--cwd", default=os.getcwd())
+    p.add_argument("--cwd", help="the worktree to act on (default: the current directory)")
     p.add_argument("--task")
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
     def command(name, fn):
@@ -1210,14 +983,19 @@ def main(argv=None):
     os.umask(0o077)
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) == 2 and argv[0] == "hook" and argv[1] in HOOK_EVENTS:
-        # Hooks fire on every tool call; they skip building the full command parser.
-        args = argparse.Namespace(command="hook", event=argv[1], cwd=os.getcwd(), task=None)
+        # Hooks fire on every tool call; they skip building the full command parser. The
+        # hook reads its cwd from the payload, so a deleted process cwd is not an error.
+        args = argparse.Namespace(command="hook", event=argv[1], cwd=None, task=None)
     else:
         args = parser().parse_args(argv)
     try:
         if args.command == "hook":
             from .hooks import handle
             return handle(args)
+        if args.cwd is None:
+            # Resolved here, inside the error boundary: a deleted working directory is a
+            # usage error for a command, never a traceback (and hooks never need it).
+            args.cwd = os.getcwd()
         if args.command == "migrate":
             from .migration import migrate
             return migrate(args)

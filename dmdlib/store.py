@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .storage import DmdError, atomic, digest, ident, lock, now, private_dir, read_json, redact, save
 from .source import git_root, identity
-from .model import SCHEMA, contract_digest, extract_clauses, validation_errors
+from .model import FINISHED, SCHEMA, contract_digest, extract_clauses, validation_errors
 from . import authority
 
 
@@ -89,7 +89,7 @@ def sibling_tasks(cwd):
         except (DmdError, OSError):
             continue
         related = pointer.parent.parent.name == project or Path(t["root"]) == root or Path(t["root"]) in root.parents or root in Path(t["root"]).parents
-        if related and t["state"] not in ("COMPLETE", "CANCELLED"):
+        if related and t["state"] not in FINISHED:
             found.append((t["task_id"], t["state"], t["root"]))
     return found
 
@@ -178,11 +178,17 @@ def remember_session(task, session):
     if len(sessions) > MAX_SESSIONS:
         del sessions[:-MAX_SESSIONS]
 
-def bind_session(directory, session):
-    if not session or len(session) > 512:
+def valid_session(session):
+    if not isinstance(session, str) or not 1 <= len(session) <= 512:
         raise DmdError("a host session ID of 1..512 characters is required")
-    # Bindings whose task no longer exists are dead weight; drop them as we go.
-    prune_sessions()
+    return session
+
+def bind_session(directory, session):
+    valid_session(session)
+    # Bindings whose task no longer exists are dead weight; drop them as we go. Pruning is
+    # housekeeping: a contended prune lock or a vanished file must not fail the binding.
+    with contextlib.suppress(DmdError, OSError):
+        prune_sessions()
     atomic(binding_path(session), json.dumps({"task_dir": str(directory), "session_hash": digest(session)}))
 
 def rebind_sessions(old, new):
@@ -249,8 +255,8 @@ def save_config(data):
 def create_task(cwd, task_id, request, authorization, session=None, new=False, require_review=False, prepare=None):
     """Create and activate a task record for the worktree at cwd. An unfinished task there
     is superseded (paused) only when `new` is set; its sessions follow the new task."""
-    if session is not None and not 1 <= len(session) <= 512:
-        raise DmdError("a host session ID of 1..512 characters is required")
+    if session is not None:
+        valid_session(session)
     base, root = base_dir(cwd, create=True)
     task_id = ident(task_id or "T-" + uuid.uuid4().hex)
     directory = base / task_id
@@ -275,9 +281,9 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
         old = locate(cwd)
         if old:
             prior = load_task(old)
-            if prior["state"] not in ("COMPLETE", "CANCELLED") and not new:
+            if prior["state"] not in FINISHED and not new:
                 raise DmdError("unfinished assignment exists; resume it or explicitly use --new")
-            if prior["state"] not in ("COMPLETE", "CANCELLED"):
+            if prior["state"] not in FINISHED:
                 with lock(old):
                     prior = load_task(old)
                     if prior.get("running"):

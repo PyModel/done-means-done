@@ -46,11 +46,11 @@ def private_dir(path):
     path = Path(os.path.abspath(path))
     # Reject symlinked state ancestors instead of following user-controlled links.
     for part in [*reversed(path.parents), path]:
-        if part.exists() or part.is_symlink():
-            if part.is_symlink() or not part.is_dir():
-                raise DmdError(f"unsafe state directory: {part}")
-        else:
-            part.mkdir(mode=0o700)
+        if not (part.exists() or part.is_symlink()):
+            # Two processes (a hook and the CLI) may create the same directory at once.
+            part.mkdir(mode=0o700, exist_ok=True)
+        if part.is_symlink() or not part.is_dir():
+            raise DmdError(f"unsafe state directory: {part}")
     st = path.stat()
     if st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) & 0o077:
         raise DmdError(f"state directory must be owned by this user and mode 0700: {path}")

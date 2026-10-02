@@ -9,6 +9,10 @@ from .authority import undisclosed, unconfirmed
 
 SCHEMA = 2
 TASK_STATES = {"ACTIVE", "PAUSED", "BLOCKED", "CANCELLED", "COMPLETE"}
+# A suspended task is not enforced and cannot run checks; a finished one is left alone by
+# the hooks and may be superseded without --new. Every module reads these two names.
+SUSPENDED = ("PAUSED", "CANCELLED")
+FINISHED = ("COMPLETE", "CANCELLED")
 WORK_STATES = {"todo", "doing", "implemented", "verified"}
 FINDING_STATES = {"suspected", "confirmed", "fixed-unverified", "fixed-verified", "disproved", "duplicate", "deferred"}
 # Findings the agent may not resolve on its own judgement: `deferred` exists only under
@@ -22,6 +26,10 @@ OPTIONAL_CHECK_FIELDS = ("candidate", "exclusive", "writes")
 # Only a command check produces machine-verifiable acceptance. Every other method is an
 # agent or operator attestation: recorded, rendered and counted as such, never disguised.
 ATTESTED_METHODS = ("manual", "review", "browser")
+
+def _text(value):
+    """A required text field: a JSON null is not the string "None"."""
+    return str(value or "").strip()
 
 def live(items):
     """Records the agent superseded stay in the ledger and the report, but owe nothing."""
@@ -128,10 +136,20 @@ def candidate_outputs(task):
             found.setdefault(check_candidate(c, task["root"]), set()).update(c["writes"])
     return {path: sorted(globs) for path, globs in found.items()}
 
-def task_snapshot(task):
+def task_snapshot(task, missing_ok=False):
+    """One snapshot per candidate. With `missing_ok`, a candidate that no longer exists is
+    recorded as drift instead of raising, so a run whose check removed its own scratch
+    tree can still write its receipts."""
     outputs = candidate_outputs(task)
-    return {path: snapshot(Path(path), inputs, exclude=outputs.get(path, ()))
-            for path, inputs in task_candidates(task).items()}
+    found = {}
+    for path, inputs in task_candidates(task).items():
+        try:
+            found[path] = snapshot(Path(path), inputs, exclude=outputs.get(path, ()))
+        except MissingCandidate:
+            if not missing_ok:
+                raise
+            found[path] = {"fingerprint": "missing:" + path, "head": None, "files": {}, "missing_inputs": [], "excluded": []}
+    return found
 
 def task_fingerprint(task):
     """Per-candidate fingerprints keyed by absolute path. A check's evidence is bound to
@@ -155,7 +173,7 @@ def validation_errors(t):
         errors.append("invalid task state")
     if not isinstance(t["root"], str) or not Path(t["root"]).is_absolute():
         errors.append("invalid project root")
-    if not str(t["original_request"]).strip() or not str(t["authorization"]).strip():
+    if not _text(t["original_request"]) or not _text(t["authorization"]):
         errors.append("original request and activation authority are required")
     groups = {"requirements": "R", "work": "W", "checks": "A", "findings": "F", "blockers": "B", "uncertain": "U"}
     for group, prefix in groups.items():
@@ -176,19 +194,19 @@ def validation_errors(t):
     checks = {c["id"] for c in t["checks"]}
     findings = {f["id"] for f in t["findings"]}
     for r in t["requirements"]:
-        if not str(r.get("text", "")).strip() or not str(r.get("anchor", "")).strip():
+        if not _text(r.get("text")) or not _text(r.get("anchor")):
             errors.append(f"{r['id']}: text and request anchor required")
         if r.get("status") not in ("active", "removed"):
             errors.append(f"{r['id']}: invalid requirement state")
         if r.get("status") == "removed" and not r.get("authority"):
             errors.append(f"{r['id']}: removal has no operator authority")
-        if r.get("attest_only") and not str(r.get("attest_only_authority", "")).strip():
+        if r.get("attest_only") and not _text(r.get("attest_only_authority")):
             errors.append(f"{r['id']}: attested-only acceptance has no operator authority")
     deps = {}
     for w in t["work"]:
-        if w.get("req") not in reqs or w.get("status") not in WORK_STATES or not str(w.get("text", "")).strip():
+        if w.get("req") not in reqs or w.get("status") not in WORK_STATES or not _text(w.get("text")):
             errors.append(f"{w['id']}: invalid requirement, work state, or text")
-        if w.get("removed") and not str(w.get("removed_reason", "")).strip():
+        if w.get("removed") and not _text(w.get("removed_reason")):
             errors.append(f"{w['id']}: superseded work has no recorded rationale")
         d = w.get("deps", [])
         if not isinstance(d, list) or any(x not in works for x in d):
@@ -220,20 +238,21 @@ def validation_errors(t):
             errors.append(f"{c['id']}: invalid work mapping")
         elif any(get(t["work"], w)["req"] != c["req"] for w in c["work"]):
             errors.append(f"{c['id']}: work belongs to another requirement")
-        if not str(c.get("expect", "")).strip():
+        if not _text(c.get("expect")):
             errors.append(f"{c['id']}: missing behavioral expectation")
-        if c.get("removed") and not str(c.get("removed_reason", "")).strip():
+        if c.get("removed") and not _text(c.get("removed_reason")):
             errors.append(f"{c['id']}: superseded check has no recorded rationale")
-        if c.get("method") == "command" and str(c.get("attested_because") or "").strip():
+        if c.get("method") == "command" and _text(c.get("attested_because")):
             errors.append(f"{c['id']}: a command check does not take an attestation rationale")
         if c.get("method") == "command":
-            if not c.get("needs_review") and (not str(c.get("command") or "").strip() or not str(c.get("match") or "").strip()):
+            if not c.get("needs_review") and (not _text(c.get("command")) or not _text(c.get("match"))):
                 errors.append(f"{c['id']}: command and literal success match required")
             if not isinstance(c.get("timeout"), (int, float)) or isinstance(c.get("timeout"), bool) or not 0 < c["timeout"] <= 604800:
                 errors.append(f"{c['id']}: invalid timeout")
             if not isinstance(c.get("max_output"), int) or not 1024 <= c["max_output"] <= 1048576:
                 errors.append(f"{c['id']}: invalid output limit")
-            if c.get("regression") and (not str(c.get("red_match", "")).strip() or not 1 <= c.get("red_exit", 0) <= 125):
+            if c.get("regression") and (not _text(c.get("red_match")) or not isinstance(c.get("red_exit"), int)
+                                        or isinstance(c.get("red_exit"), bool) or not 1 <= c["red_exit"] <= 125):
                 errors.append(f"{c['id']}: regression requires an intentional failure match and exit 1..125")
         if c.get("candidate") is not None and (not isinstance(c["candidate"], str) or not Path(c["candidate"]).is_absolute()):
             errors.append(f"{c['id']}: candidate must be an absolute path")
@@ -248,7 +267,7 @@ def validation_errors(t):
     for f in t["findings"]:
         if f.get("status") not in FINDING_STATES:
             errors.append(f"{f['id']}: invalid finding disposition")
-        if not str(f.get("location", "")).strip() or not str(f.get("text", "")).strip():
+        if not _text(f.get("location")) or not _text(f.get("text")):
             errors.append(f"{f['id']}: finding text and location required")
         if f.get("status") == "duplicate" and f.get("duplicate") not in findings:
             errors.append(f"{f['id']}: missing canonical finding")
@@ -256,7 +275,7 @@ def validation_errors(t):
             errors.append(f"{f['id']}: missing remediation work or check")
     clauses = t.get("clauses", [])
     if not isinstance(clauses, list) or any(not isinstance(c, dict) or not re.fullmatch(r"C-\d{2,}", str(c.get("id", "")))
-                                            or not str(c.get("text", "")).strip() for c in clauses):
+                                            or not _text(c.get("text")) for c in clauses):
         errors.append("invalid request list items")
     else:
         clause_ids = {c["id"] for c in clauses}
@@ -266,7 +285,7 @@ def validation_errors(t):
                 errors.append(f"{r['id']}: covers an unknown request item")
     all_ids = reqs | works | checks | findings | {"task"}
     for b in t["blockers"]:
-        if b.get("item") not in all_ids or not all(str(b.get(x, "")).strip() for x in ("text", "owner", "unblock", "proof")):
+        if b.get("item") not in all_ids or not all(_text(b.get(x)) for x in ("text", "owner", "unblock", "proof")):
             errors.append(f"{b['id']}: incomplete concrete blocker")
     return errors
 
@@ -348,9 +367,6 @@ def red_ok(task_dir, c):
     baseline = c.get("baseline") or {}
     return bool(baseline.get("reason")) and baseline.get("definition") == digest(check_definition(c)) and evidence_ok(task_dir, baseline.get("artifact"))
 
-def work_ok(task_dir, t, w, fp):
-    return assess(task_dir, t, fp).work_ok(w["id"])
-
 EVIDENCE_IDENTITY = ("kind", "source", "definition", "candidate", "exit", "matched", "failure", "note", "stale", "reason")
 
 def evidence_identity(record):
@@ -376,10 +392,6 @@ def repeated_attempts(history):
     """Two equivalent failures anywhere in the recent history, not only back to back."""
     recent = [a.get("signature") for a in history[-6:]]
     return any(recent.count(s) >= 2 for s in set(recent) if s)
-
-SUSPENDED = ("PAUSED", "CANCELLED")
-OPEN_FINDING_STATES = ("suspected", "confirmed", "fixed-unverified")
-
 
 class Assessment:
     """One evaluation of a task against one source map. Every check, red baseline, work
@@ -453,7 +465,7 @@ class Assessment:
                         reason = "duplicate needs rationale"; break
                     current = f.get("duplicate"); continue
                 if status == "deferred":
-                    if not f.get("note") or not str(f.get("authority") or "").strip():
+                    if not f.get("note") or not _text(f.get("authority")):
                         reason = "deferral needs a rationale and recorded operator authority"
                     break
                 if status == "disproved":
@@ -762,9 +774,6 @@ class Assessment:
 
 def assess(task_dir, t, fp):
     return Assessment(task_dir, t, fp)
-
-def unresolved_findings(task_dir, t, fp):
-    return assess(task_dir, t, fp).findings
 
 def gate(task_dir, t, fp=None, require_review=True):
     return evaluate(task_dir, t, fp, require_review)[0]
