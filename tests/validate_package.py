@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
+    def packaged(path: Path):
+        """Workspace overlays (a live .claude/, the tasks/ ledger) are not package content."""
+        rel = path.relative_to(ROOT)
+        return not any(part.startswith('.') or part == 'tasks' for part in rel.parts[:-1]) and not rel.parts[0].startswith('.')
     required = ['SKILL.md', 'README.md', 'LICENSE', 'SOURCE.json', 'bin/dmd', 'hooks/install.py',
                 'references/commands.md', 'references/verification.md', 'references/recovery.md',
                 'references/security.md', 'references/adoption.md', 'tests/run.py',
@@ -22,17 +26,17 @@ def main():
     front = skill.split('---\n', 2)[1]
     assert re.search(r'^name: done-means-done$', front, re.M)
     assert re.search(r'^description: .{40,1024}$', front, re.M)
-    assert 'version: "0.7.1"' in front
+    assert 'version: "0.8.0"' in front
     assert len(skill.splitlines()) < 500
     assert '!`' not in skill, 'skill must not execute dynamic commands at load'
     assert 'allowed-tools:' not in front, 'no broad permission preapproval'
     source = json.loads((ROOT / 'SOURCE.json').read_text())
-    assert source['name'] == 'done-means-done' and source['version'] == '0.7.1'
+    assert source['name'] == 'done-means-done' and source['version'] == '0.8.0'
     assert len(source['inspected_commit']) == 40
-    python_files = list(ROOT.rglob('*.py')) + [ROOT / 'bin/dmd']
+    python_files = [p for p in ROOT.rglob('*.py') if packaged(p)] + [ROOT / 'bin/dmd']
     for path in python_files:
         ast.parse(path.read_text(), filename=str(path), feature_version=(3, 10))
-    docs = list(ROOT.rglob('*.md')); links = 0
+    docs = [p for p in ROOT.rglob('*.md') if packaged(p)]; links = 0
     for path in docs:
         text = path.read_text(); fenced = False
         for line in text.splitlines():
@@ -46,8 +50,10 @@ def main():
             links += 1
     readme = (ROOT / 'README.md').read_text()
     assert not re.search(r'#\s*\d+ tests', readme), 'README must not hard-code the test count'
-    assert 'Done Means Done 0.7.1' in (ROOT / 'evidence/VALIDATION.md').read_text().splitlines()[2], 'VALIDATION.md release header is stale'
+    assert 'Done Means Done 0.8.0' in (ROOT / 'evidence/VALIDATION.md').read_text().splitlines()[2], 'VALIDATION.md release header is stale'
     for path in ROOT.rglob('*'):
+        if not packaged(path):
+            continue
         assert not path.is_symlink(), f'nonportable symlink: {path}'
         assert path.name != '__pycache__', f'bytecode cache in package: {path}'
     print(f'DMD_PACKAGE_PASS:python={len(python_files)};markdown={len(docs)};local-links={links};skill-lines={len(skill.splitlines())}')

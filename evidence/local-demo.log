@@ -1,6 +1,6 @@
-$ dmd init -m 'Deliver VALUE=42 and remediate the discovered incorrect value' --authority 'Local acceptance fixture explicitly authorizes its temporary project'
-T-601f3f6119ee426896cabf884d403d0d
-$ dmd req add 'VALUE equals 42' --anchor 'Fixture original request'
+$ dmd init -m 'Deliver VALUE=42 and remediate the discovered incorrect value' --authority 'Local acceptance fixture explicitly authorizes its temporary project' --session demo-session
+T-780d97e296464b60b8ae3ec8c02c48bb
+$ dmd req add 'VALUE equals 42' --anchor VALUE=42
 R-01
 $ dmd work add 'Fix value and verify the actual import' --req R-01 --owns subject.py
 W-01
@@ -9,9 +9,8 @@ A-01
 $ dmd finding add 'VALUE is 41 rather than required 42' --location subject.py:1 --status confirmed --origin pre-existing
 F-01
 $ dmd coverage assert --note 'Original outcome and confirmed defect map to R-01, W-01, A-01 and F-01'
-coverage recorded; semantic completeness still requires source-request review
-$ dmd run A-01
-dmd: A-01 has no current inspected approval: never approved. Re-inspect and run: dmd approve A-01 --note '<what you inspected>'
+AU-01: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-01
+coverage recorded; operator must compare the full request, including prose, with every outcome
 $ dmd preview A-01
 {
   "definition": {
@@ -22,35 +21,46 @@ $ dmd preview A-01
     ],
     "method": "command",
     "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -B verify.py",
-    "cwd": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project",
+    "cwd": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project",
     "expect": "One real assertion verifies imported VALUE=42",
     "match": "VALUE_ACCEPTANCE_PASS:1",
     "timeout": 300,
     "max_output": 1048576,
     "inputs": [
-      "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project/verify.py"
+      "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project/verify.py"
     ],
     "regression": true,
     "red_match": "EXPECTED_VALUE_42",
     "red_exit": 1,
     "attested_because": null,
-    "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project"
+    "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project"
   },
   "shell": "/bin/sh",
-  "path_fingerprint": "02bde4a02910874246f2482d4dbae763ee11a29b572911a0f5e620e7c97c9410",
+  "path_fingerprint": "4125e797447513e10fdf095e7fe6307001c3cc8fa81fb1a7af5aba633f7e26d4",
   "instruction": "Inspect the command and every called script. Approval is an operator-authorized action, not implied by a ledger."
 }
 $ dmd approve A-01 --note 'Fixture verifier was authored above and inspected; it performs one assertion with no external effects'
-A-01 approved for the exact displayed definition and environment
-$ dmd run A-01 --red
-{"check": "A-01", "result": "RED-OK", "exit": 1, "matched": true, "failure": null, "duration_s": 0.049184, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/state/v2/e26d8b821d6bb61113d2fce9/e26d8b821d6bb61113d2fce9/T-601f3f6119ee426896cabf884d403d0d/evidence/command-76e6a8e8ecf54cf49c9b0e2dfce54cfb.txt"}
+AU-02: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-02
+A-01 approved for the exact displayed definition, inputs and environment; counts once the operator confirms it
 $ dmd run A-01
-{"check": "A-01", "result": "PASS", "exit": 0, "matched": true, "failure": null, "duration_s": 0.048327, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/state/v2/e26d8b821d6bb61113d2fce9/e26d8b821d6bb61113d2fce9/T-601f3f6119ee426896cabf884d403d0d/evidence/command-8b24ba8a1c3647bdad159791c89ebae5.txt"}
+dmd: A-01 verifier approval awaits operator confirmation; inspection notes alone cannot authorize execution
+$ dmd approve A-01 --note 'Fixture verifier was authored above and inspected; it performs one assertion with no external effects'
+AU-03: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-03
+A-01 approved for the exact displayed definition, inputs and environment; counts once the operator confirms it
+$ dmd run A-01 --red
+{"check": "A-01", "result": "RED-OK", "exit": 1, "matched": true, "failure": null, "duration_s": 0.149334, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/state/v2/114ddca2966a3ff4ee231f5b/114ddca2966a3ff4ee231f5b/T-780d97e296464b60b8ae3ec8c02c48bb/evidence/command-00556ef6fe5c497d957919b722707c03.txt"}
+$ dmd run A-01
+{"check": "A-01", "result": "PASS", "exit": 0, "matched": true, "failure": null, "duration_s": 0.118993, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/state/v2/114ddca2966a3ff4ee231f5b/114ddca2966a3ff4ee231f5b/T-780d97e296464b60b8ae3ec8c02c48bb/evidence/command-1b11ffdac89b45889b2a48275c8b134b.txt"}
 $ dmd work set --id W-01 --status verified
 W-01 verified
 $ dmd finding set --id F-01 --status fixed-verified --work W-01 --check A-01 --note 'Actual faulty baseline reproduced; root value repaired and regression verified'
 F-01 fixed-verified
-$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Final fixture contract and real assertion inspected' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/review.txt
+$ dmd review-policy self --authority 'Fixture operator accepts a self review for this demonstration'
+AU-04: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-04
+$ dmd coverage assert --note 'Reconciled after the review-policy decision'
+AU-05: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-05
+coverage recorded; operator must compare the full request, including prose, with every outcome
+$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Final fixture contract and real assertion inspected' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/review.txt
 final review recorded
 $ dmd gate
 {
@@ -58,11 +68,16 @@ $ dmd gate
   "reasons": [],
   "next": [],
   "source": {
-    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project": "32a2f3757028e8138847071d7b29f571ce14486ff4427812a384bfe51a2c00bb"
+    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project": "2e08f909684e7af3d06b1d820e14ed9bae251456fb06bdf968c82824cac55ff5"
   },
   "attestation": {
     "executed": 1,
-    "self_attested": 0
+    "self_attested": 0,
+    "meaning": "command capture, not semantic proof; operator-confirmed scope and verifier inspection required"
+  },
+  "request_provenance": {
+    "kind": "agent-transcribed",
+    "digest": "fb843931683e12c59e515cfd95903702447a46c40a0a5a1905a859553a5b3ef2"
   },
   "summary": {
     "headline": "all obligations satisfied",
@@ -93,7 +108,7 @@ $ dmd gate
   "status": "ACTIVE",
   "reasons": [
     "W-01: checks owed: A-01",
-    "A-01: stale: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project changed since the receipt (tested @ no-head); rerun",
+    "A-01: stale: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project changed since the receipt (tested @ no-head); rerun",
     "F-01: remediation work not currently verified",
     "review: final request/diff/integration review missing or stale"
   ],
@@ -108,11 +123,16 @@ $ dmd gate
     }
   ],
   "source": {
-    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project": "2bdb14c26d201d1e1816a288c5c077033d13b83b34821bb6cfabb3abd652f475"
+    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project": "3d1616d12a3e74d10ad70c9c29d74d2345ea1f134d34effe1acbf56fa16b80de"
   },
   "attestation": {
     "executed": 0,
-    "self_attested": 0
+    "self_attested": 0,
+    "meaning": "command capture, not semantic proof; operator-confirmed scope and verifier inspection required"
+  },
+  "request_provenance": {
+    "kind": "agent-transcribed",
+    "digest": "fb843931683e12c59e515cfd95903702447a46c40a0a5a1905a859553a5b3ef2"
   },
   "summary": {
     "headline": "1 check(s) stale; 1 finding(s) open; final review owed",
@@ -143,10 +163,10 @@ $ dmd gate
   }
 }
 $ dmd run A-01
-{"check": "A-01", "result": "FAIL", "exit": 1, "matched": false, "failure": null, "duration_s": 0.058476, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/state/v2/e26d8b821d6bb61113d2fce9/e26d8b821d6bb61113d2fce9/T-601f3f6119ee426896cabf884d403d0d/evidence/command-49026992305b4ac9b659d60df5d0a495.txt"}
+{"check": "A-01", "result": "FAIL", "exit": 1, "matched": false, "failure": null, "duration_s": 0.08952, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/state/v2/114ddca2966a3ff4ee231f5b/114ddca2966a3ff4ee231f5b/T-780d97e296464b60b8ae3ec8c02c48bb/evidence/command-042ab7bd2f354bbeaaff0ffc151c0c2b.txt"}
 $ dmd run A-01
-{"check": "A-01", "result": "PASS", "exit": 0, "matched": true, "failure": null, "duration_s": 0.045549, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/state/v2/e26d8b821d6bb61113d2fce9/e26d8b821d6bb61113d2fce9/T-601f3f6119ee426896cabf884d403d0d/evidence/command-1815009fc1064331a26f6f44d66d165a.txt"}
-$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Final fixture restored, retested and reviewed after freshness challenge' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/review.txt
+{"check": "A-01", "result": "PASS", "exit": 0, "matched": true, "failure": null, "duration_s": 0.091606, "candidate": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project", "head": null, "evidence": "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/state/v2/114ddca2966a3ff4ee231f5b/114ddca2966a3ff4ee231f5b/T-780d97e296464b60b8ae3ec8c02c48bb/evidence/command-aabe766664d144e49759eb51cd1ed8dc.txt"}
+$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Final fixture restored, retested and reviewed after freshness challenge' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/review.txt
 final review recorded
 $ dmd gate
 {
@@ -154,11 +174,16 @@ $ dmd gate
   "reasons": [],
   "next": [],
   "source": {
-    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project": "32a2f3757028e8138847071d7b29f571ce14486ff4427812a384bfe51a2c00bb"
+    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project": "2e08f909684e7af3d06b1d820e14ed9bae251456fb06bdf968c82824cac55ff5"
   },
   "attestation": {
     "executed": 1,
-    "self_attested": 0
+    "self_attested": 0,
+    "meaning": "command capture, not semantic proof; operator-confirmed scope and verifier inspection required"
+  },
+  "request_provenance": {
+    "kind": "agent-transcribed",
+    "digest": "fb843931683e12c59e515cfd95903702447a46c40a0a5a1905a859553a5b3ef2"
   },
   "summary": {
     "headline": "all obligations satisfied",
@@ -185,34 +210,45 @@ $ dmd gate
   }
 }
 $ dmd report --save
-# Done Means Done | T-601f3f6119ee426896cabf884d403d0d | COMPLETE
+# Done Means Done | T-780d97e296464b60b8ae3ec8c02c48bb | COMPLETE
 
 ## Assignment
 Deliver VALUE=42 and remediate the discovered incorrect value
+Request provenance: agent-transcribed
 
 ## Acceptance basis
 - Accepted checks executed by dmd: 1
 - Accepted checks SELF-ATTESTED by the agent (no command was run): 0
+- Command capture is not semantic proof. Inspect actual assertions and the full request-to-outcome mapping.
+- Supplied review/blocker files and stdin are agent-transcribed notes, not authenticated external observations.
 
 ## Requirements
-- R-01 [active] VALUE equals 42 (source: Fixture original request)
+- R-01 [active] VALUE equals 42 (source: VALUE=42)
 
 ## Work
 - W-01 [verified] Fix value and verify the actual import -> R-01; dependencies: none
 
 ## Checks
-- A-01 [ACCEPTED · EXECUTED] (command) One real assertion verifies imported VALUE=42
-  Evidence: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/state/v2/e26d8b821d6bb61113d2fce9/e26d8b821d6bb61113d2fce9/T-601f3f6119ee426896cabf884d403d0d/evidence/command-1815009fc1064331a26f6f44d66d165a.txt
-  Tested: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project @ no-head
+- A-01 [ACCEPTED · COMMAND CAPTURE] (command) One real assertion verifies imported VALUE=42
+  Verifier: operator-confirmed definition and declared inputs
+  Evidence: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/state/v2/114ddca2966a3ff4ee231f5b/114ddca2966a3ff4ee231f5b/T-780d97e296464b60b8ae3ec8c02c48bb/evidence/command-aabe766664d144e49759eb51cd1ed8dc.txt
+  Tested: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project @ no-head
 
 ## Findings (all severities and origins)
 - F-01 [fixed-verified; pre-existing] subject.py:1: VALUE is 41 rather than required 42; Actual faulty baseline reproduced; root value repaired and regression verified
 
 ## Blockers and external outcomes
 
+## Operator decisions
+- AU-01 [confirmed via host-prompt] coverage.assert coverage: Original outcome and confirmed defect map to R-01, W-01, A-01 and F-01
+- AU-02 [withdrawn] check.approve A-01: Fixture verifier was authored above and inspected; it performs one assertion with no external effects
+- AU-03 [confirmed via host-prompt] check.approve A-01: Fixture verifier was authored above and inspected; it performs one assertion with no external effects
+- AU-04 [confirmed via host-prompt] review-policy review-policy: Fixture operator accepts a self review for this demonstration
+- AU-05 [confirmed via host-prompt] coverage.assert coverage: Reconciled after the review-policy decision
+
 ## Review history
-- 2026-09-22T21:00:55.131894+00:00 [accepted] self review by deterministic local fixture: Final fixture contract and real assertion inspected
-- 2026-09-22T21:00:55.790793+00:00 [accepted] self review by deterministic local fixture: Final fixture restored, retested and reviewed after freshness challenge
+- 2026-10-03T18:40:05.430721+00:00 [accepted] self review by deterministic local fixture: Final fixture contract and real assertion inspected
+- 2026-10-03T18:40:06.671367+00:00 [accepted] self review by deterministic local fixture: Final fixture restored, retested and reviewed after freshness challenge
 
 ## Still owed
 
@@ -220,20 +256,21 @@ Deliver VALUE=42 and remediate the discovered incorrect value
 
 Review: self
 Source:
-- /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project: 32a2f3757028e8138847071d7b29f571ce14486ff4427812a384bfe51a2c00bb
+- /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project: 2e08f909684e7af3d06b1d820e14ed9bae251456fb06bdf968c82824cac55ff5
 Evidence is local auditability, not tamper-proof attestation.
-$ dmd req add 'The rendered page looks correct to a person' --anchor 'Original request, outcome 2'
+$ dmd req add 'The rendered page looks correct to a person' --anchor 'remediate the discovered'
 R-02
 $ dmd work add 'Lay out and visually check the page' --req R-02
 W-02
 $ dmd check add --req R-02 --work W-02 --method browser --expect 'A person confirms the rendered layout at the declared viewport' --attested-because 'No command can assert how a rendered page looks to a person'
 A-02
-$ dmd check set --id A-02 --status PASS --note 'Observed at 1280x800; banner and totals as specified' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/observation.txt
+$ dmd check set --id A-02 --status PASS --note 'Observed at 1280x800; banner and totals as specified' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/observation.txt
 
 $ dmd work set --id W-02 --status verified
 W-02 verified
 $ dmd coverage assert --note 'Both outcomes mapped; R-02 is observable only by a person'
-coverage recorded; semantic completeness still requires source-request review
+AU-06: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-06
+coverage recorded; operator must compare the full request, including prose, with every outcome
 $ dmd gate
 {
   "status": "ACTIVE",
@@ -248,11 +285,16 @@ $ dmd gate
     }
   ],
   "source": {
-    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project": "32a2f3757028e8138847071d7b29f571ce14486ff4427812a384bfe51a2c00bb"
+    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project": "2e08f909684e7af3d06b1d820e14ed9bae251456fb06bdf968c82824cac55ff5"
   },
   "attestation": {
     "executed": 1,
-    "self_attested": 1
+    "self_attested": 1,
+    "meaning": "command capture, not semantic proof; operator-confirmed scope and verifier inspection required"
+  },
+  "request_provenance": {
+    "kind": "agent-transcribed",
+    "digest": "fb843931683e12c59e515cfd95903702447a46c40a0a5a1905a859553a5b3ef2"
   },
   "summary": {
     "headline": "final review owed",
@@ -281,9 +323,11 @@ $ dmd gate
 }
 $ dmd req attest-only --id R-02 --authority 'Operator accepts a recorded human observation for this outcome'
 R-02 may be accepted on attestation alone under recorded operator authority
+AU-07: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-07
 $ dmd coverage assert --note 'Reconciled after recording attested-only authority'
-coverage recorded; semantic completeness still requires source-request review
-$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Both outcomes reconciled; R-02 rests on a recorded human observation' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/review.txt
+AU-08: takes effect once the operator approves it; the host asks them before this command runs. If they did not, undo it: dmd authority withdraw AU-08
+coverage recorded; operator must compare the full request, including prose, with every outcome
+$ dmd review --kind self --reviewer 'deterministic local fixture' --note 'Both outcomes reconciled; R-02 rests on a recorded human observation' --evidence /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/review.txt
 final review recorded
 $ dmd gate
 {
@@ -291,11 +335,16 @@ $ dmd gate
   "reasons": [],
   "next": [],
   "source": {
-    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project": "32a2f3757028e8138847071d7b29f571ce14486ff4427812a384bfe51a2c00bb"
+    "/private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project": "2e08f909684e7af3d06b1d820e14ed9bae251456fb06bdf968c82824cac55ff5"
   },
   "attestation": {
     "executed": 1,
-    "self_attested": 1
+    "self_attested": 1,
+    "meaning": "command capture, not semantic proof; operator-confirmed scope and verifier inspection required"
+  },
+  "request_provenance": {
+    "kind": "agent-transcribed",
+    "digest": "fb843931683e12c59e515cfd95903702447a46c40a0a5a1905a859553a5b3ef2"
   },
   "summary": {
     "headline": "all obligations satisfied",
@@ -318,38 +367,40 @@ $ dmd gate
     "blockers_open": [],
     "review": "current",
     "authority_unconfirmed": [],
-    "authority_unverified": [
-      "AU-01"
-    ],
+    "authority_unverified": [],
     "rerun": null
   }
 }
 $ dmd report --save
-# Done Means Done | T-601f3f6119ee426896cabf884d403d0d | COMPLETE
+# Done Means Done | T-780d97e296464b60b8ae3ec8c02c48bb | COMPLETE
 
 ## Assignment
 Deliver VALUE=42 and remediate the discovered incorrect value
+Request provenance: agent-transcribed
 
 ## Acceptance basis
 - Accepted checks executed by dmd: 1
 - Accepted checks SELF-ATTESTED by the agent (no command was run): 1
+- Command capture is not semantic proof. Inspect actual assertions and the full request-to-outcome mapping.
+- Supplied review/blocker files and stdin are agent-transcribed notes, not authenticated external observations.
 
 ## Requirements
-- R-01 [active] VALUE equals 42 (source: Fixture original request)
-- R-02 [active] The rendered page looks correct to a person (source: Original request, outcome 2) — attested-only by operator authority: Operator accepts a recorded human observation for this outcome
+- R-01 [active] VALUE equals 42 (source: VALUE=42)
+- R-02 [active] The rendered page looks correct to a person (source: remediate the discovered) — attested-only by operator authority: Operator accepts a recorded human observation for this outcome
 
 ## Work
 - W-01 [verified] Fix value and verify the actual import -> R-01; dependencies: none
 - W-02 [verified] Lay out and visually check the page -> R-02; dependencies: none
 
 ## Checks
-- A-01 [ACCEPTED · EXECUTED] (command) One real assertion verifies imported VALUE=42
-  Evidence: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/state/v2/e26d8b821d6bb61113d2fce9/e26d8b821d6bb61113d2fce9/T-601f3f6119ee426896cabf884d403d0d/evidence/command-1815009fc1064331a26f6f44d66d165a.txt
-  Tested: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project @ no-head
+- A-01 [ACCEPTED · COMMAND CAPTURE] (command) One real assertion verifies imported VALUE=42
+  Verifier: operator-confirmed definition and declared inputs
+  Evidence: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/state/v2/114ddca2966a3ff4ee231f5b/114ddca2966a3ff4ee231f5b/T-780d97e296464b60b8ae3ec8c02c48bb/evidence/command-aabe766664d144e49759eb51cd1ed8dc.txt
+  Tested: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project @ no-head
 - A-02 [ACCEPTED · SELF-ATTESTED] (browser) A person confirms the rendered layout at the declared viewport
   Attested because: No command can assert how a rendered page looks to a person
-  Evidence: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/state/v2/e26d8b821d6bb61113d2fce9/e26d8b821d6bb61113d2fce9/T-601f3f6119ee426896cabf884d403d0d/evidence/review-0fc0f80e0f904a34bcc3e54a932e6009.txt
-  Tested: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project @ no-head
+  Evidence: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/state/v2/114ddca2966a3ff4ee231f5b/114ddca2966a3ff4ee231f5b/T-780d97e296464b60b8ae3ec8c02c48bb/evidence/review-996317f9e501481a9665144130935120.txt
+  Tested: /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project @ no-head
 
 ## Findings (all severities and origins)
 - F-01 [fixed-verified; pre-existing] subject.py:1: VALUE is 41 rather than required 42; Actual faulty baseline reproduced; root value repaired and regression verified
@@ -357,12 +408,19 @@ Deliver VALUE=42 and remediate the discovered incorrect value
 ## Blockers and external outcomes
 
 ## Operator decisions
-- AU-01 [NOT CONFIRMED: no confirmation channel was installed] req.attest-only R-02: Operator accepts a recorded human observation for this outcome
+- AU-01 [confirmed via host-prompt] coverage.assert coverage: Original outcome and confirmed defect map to R-01, W-01, A-01 and F-01
+- AU-02 [withdrawn] check.approve A-01: Fixture verifier was authored above and inspected; it performs one assertion with no external effects
+- AU-03 [confirmed via host-prompt] check.approve A-01: Fixture verifier was authored above and inspected; it performs one assertion with no external effects
+- AU-04 [confirmed via host-prompt] review-policy review-policy: Fixture operator accepts a self review for this demonstration
+- AU-05 [confirmed via host-prompt] coverage.assert coverage: Reconciled after the review-policy decision
+- AU-06 [confirmed via host-prompt] coverage.assert coverage: Both outcomes mapped; R-02 is observable only by a person
+- AU-07 [confirmed via host-prompt] req.attest-only R-02: Operator accepts a recorded human observation for this outcome
+- AU-08 [confirmed via host-prompt] coverage.assert coverage: Reconciled after recording attested-only authority
 
 ## Review history
-- 2026-09-22T21:00:55.131894+00:00 [accepted] self review by deterministic local fixture: Final fixture contract and real assertion inspected
-- 2026-09-22T21:00:55.790793+00:00 [accepted] self review by deterministic local fixture: Final fixture restored, retested and reviewed after freshness challenge
-- 2026-09-22T21:00:56.851622+00:00 [accepted] self review by deterministic local fixture: Both outcomes reconciled; R-02 rests on a recorded human observation
+- 2026-10-03T18:40:05.430721+00:00 [accepted] self review by deterministic local fixture: Final fixture contract and real assertion inspected
+- 2026-10-03T18:40:06.671367+00:00 [accepted] self review by deterministic local fixture: Final fixture restored, retested and reviewed after freshness challenge
+- 2026-10-03T18:40:09.589586+00:00 [accepted] self review by deterministic local fixture: Both outcomes reconciled; R-02 rests on a recorded human observation
 
 ## Still owed
 
@@ -370,6 +428,6 @@ Deliver VALUE=42 and remediate the discovered incorrect value
 
 Review: self
 Source:
-- /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-d677irwm/project: 32a2f3757028e8138847071d7b29f571ce14486ff4427812a384bfe51a2c00bb
+- /private/var/folders/fs/brn3wr_x4ns2km1cq1ph9zb80000gn/T/dmd-demo-jclpgnj0/project: 2e08f909684e7af3d06b1d820e14ed9bae251456fb06bdf968c82824cac55ff5
 Evidence is local auditability, not tamper-proof attestation.
-DMD_DEMO_PASS:real-red-green-and-stale-rejection;attested-only-refused-then-authorized;temporary-fixtures-removed
+DMD_DEMO_PASS:operator-channel-approvals;real-red-green-and-stale-rejection;attested-only-refused-then-authorized;temporary-fixtures-removed
