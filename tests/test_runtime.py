@@ -24,6 +24,10 @@ class DmdFixture(unittest.TestCase):
         self.home = Path(self.tmp.name).resolve(); self.repo = self.home / "project"; self.repo.mkdir()
         self.state = self.home / "state"
         self.env = patch.dict(os.environ, {"DMD_STATE": str(self.state), "PYTHONDONTWRITEBYTECODE": "1"}); self.env.start(); self.addCleanup(self.env.stop)
+        # Functional workflow tests simulate explicit operator responses. Adversarial
+        # subclasses override this; no production approval bypass exists.
+        self.operator_confirmation = patch("dmdlib.authority.terminal_confirms", return_value=True)
+        self.operator_confirmation.start(); self.addCleanup(self.operator_confirmation.stop)
         (self.repo / "subject.py").write_text("VALUE = 42\n")
         (self.repo / "verify.py").write_text('from subject import VALUE\nassert VALUE == 42, "EXPECTED_42"\nprint("ACCEPTANCE_PASS:1")\n')
         self.review = self.home / "review.txt"; self.review.write_text("Reviewed request mapping, actual assertions, final source and integration. Self-review, not independent.\n")
@@ -35,7 +39,8 @@ class DmdFixture(unittest.TestCase):
         return out.getvalue(), err.getvalue()
     def setup_task(self, regression=False, command="python3 -B verify.py", extra=()):
         self.cmd("init", "-m", "Deliver value 42", "--authority", "explicit operator invocation", "--session", "session-test")
-        self.cmd("req", "add", "Value is 42", "--anchor", "original request")
+        self.cmd("review-policy", "self", "--authority", "fixture operator accepts self review")
+        self.cmd("req", "add", "Value is 42", "--anchor", "value 42")
         self.cmd("work", "add", "Implement and test value", "--req", "R-01")
         args = ["check", "add", "--req", "R-01", "--work", "W-01", "--cmd", command, "--expect", "one assertion verifies VALUE=42", "--match", "ACCEPTANCE_PASS:1", *extra]
         if regression: args += ["--regression", "--red-match", "EXPECTED_42"]
@@ -220,6 +225,7 @@ class RuntimeCase(DmdFixture):
         self.assertFalse((self.state / "sessions" / (digest("later-session") + ".json")).exists())
     def test_new_obligation_reopens_a_complete_task(self):
         self.setup_task(); self.finalize(); self.cmd("config", "--mode", "enforce")
+        self.cmd("amend", "operator follow-up", "--authority", "fixture operator")
         self.cmd("req", "add", "Follow-up outcome", "--anchor", "operator follow-up")
         self.assertEqual(load_task(locate(self.repo))["state"], "ACTIVE")
         out, _ = self.cmd("hook", "stop", stdin=self.payload()); self.assertEqual(json.loads(out)["decision"], "block")

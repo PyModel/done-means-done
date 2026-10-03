@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from .model import check_definition
 from .storage import DmdError, digest
+from .authority import decision_ok, unconfirmed
 
 SHELL = str(Path("/bin/sh").resolve())
 # How long to keep reading after the command exits, for output its descendants still hold.
@@ -43,7 +44,23 @@ def approval_signature(c, legacy=False):
     return digest(approval_parts(c, legacy))
 
 def approval_current(c, recorded_signature):
-    return recorded_signature in (approval_signature(c), approval_signature(c, legacy=True))
+    return recorded_signature == approval_signature(c)
+
+
+def approval_reason(t, c):
+    recorded = t.get("approvals", {}).get(c["id"]) or {}
+    try:
+        current = approval_current(c, recorded.get("signature"))
+    except DmdError as exc:
+        return str(exc)
+    if not current:
+        return ("has no current inspected approval: " + "; ".join(approval_drift(c, recorded.get("parts")))
+                + f". Re-inspect: dmd approve {c['id']} --note '<what you inspected>'")
+    if not decision_ok(t, recorded.get("decision"), "check.approve", c["id"], recorded.get("signature")):
+        return "verifier approval awaits operator confirmation; inspection notes alone cannot authorize execution"
+    if any(e["op"] == "check.no-regression" and e["target"] == c["id"] for e in unconfirmed(t)):
+        return "regression downgrade awaits operator confirmation"
+    return None
 
 def approval_drift(c, recorded):
     """Name the components that moved since approval, most actionable first."""

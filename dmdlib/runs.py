@@ -12,9 +12,9 @@ import time
 import uuid
 from pathlib import Path
 from .storage import DmdError, digest, evidence, ident, lock, lock_wait, now, private_dir, read_json, save
-from .source import drift, recent_writes
-from .model import (SUSPENDED, candidate_outputs, check_candidate, check_definition, get, live, source_for, task_snapshot)
-from .runner import approval_current, approval_drift, approval_signature, execute
+from .source import drift, recent_writes, output_match, untracked
+from .model import (SUSPENDED, check_candidate, check_definition, get, live, source_for, task_snapshot)
+from .runner import approval_reason, approval_signature, execute
 from .store import index_run, load_task, other_runs, state_root, unindex_run
 
 QUIET_WINDOW_SECONDS = 3.0
@@ -32,9 +32,8 @@ def preflight(t, checks, window):
     an integration run and rejecting its receipt afterwards."""
     candidates = sorted({check_candidate(c, t["root"]) for c in checks})
     problems = []
-    outputs = candidate_outputs(t)
     for cand in candidates:
-        writes = recent_writes(cand, window, outputs.get(cand, ()))
+        writes = recent_writes(cand, window)
         if writes:
             # The normal agent turn is edit-then-verify. Wait (bounded by SETTLE_SECONDS)
             # for the newest write to age past the window, then re-check; refuse only a
@@ -42,7 +41,7 @@ def preflight(t, checks, window):
             wait = window - writes[0]["age_s"]
             if 0 < wait <= SETTLE_SECONDS:
                 time.sleep(wait + 0.05)
-                writes = recent_writes(cand, window, outputs.get(cand, ()))
+                writes = recent_writes(cand, window)
         if writes:
             named = ", ".join(f"{w['path']} ({w['age_s']}s ago)" for w in writes[:5])
             more = f" and {len(writes) - 5} more" if len(writes) > 5 else ""
@@ -100,6 +99,28 @@ def interruptible():
             signal.signal(sig, handler)
 
 
+def generated_outputs(planned, checks, before, after):
+    """Creation-only exceptions to in-run drift, never exclusions from a receipt. A
+    previously generated file can be rewritten only while its recorded content is intact.
+    Pre-existing untracked source and tracked paths cannot become generated outputs."""
+    found = {}
+    for c in checks:
+        cand = check_candidate(c, planned["root"])
+        b, a = before[cand]["files"], after[cand]["files"]
+        loose = untracked(cand)
+        eligible = set(a) if loose is None else loose
+        prior = (c.get("receipt") or {}).get("outputs") or {}
+        allowed = found.setdefault(cand, {})
+        for path, value in a.items():
+            file = Path(cand) / path
+            if (path not in eligible or not output_match(path, c.get("writes") or []) or value == "volatile"
+                    or not file.is_file() or file.is_symlink()):
+                continue
+            if path not in b or (prior.get(path) == b[path] and (c.get("receipt") or {}).get("assurance_version") == 2):
+                allowed[path] = value
+    return found
+
+
 def run_checks(directory, ids=(), everything=False, red=False, quiet_window=None, wait_exclusive=None):
     """Run the named checks (or every runnable one) for the task at `directory`. Returns the
     process exit code: 0 when every check passed, 1 otherwise; refusals raise DmdError."""
@@ -124,11 +145,9 @@ def _run(directory, ids, everything, red, quiet_window, wait_exclusive):
                 if c["method"] != "command" or c.get("needs_review") or c.get("removed"):
                     raise DmdError(f"{c['id']}: only fully authored, live command checks can run")
                 signature = approval_signature(c)
-                recorded = t["approvals"].get(c["id"]) or {}
-                if not approval_current(c, recorded.get("signature")):
-                    drifted = approval_drift(c, recorded.get("parts"))
-                    raise DmdError(f"{c['id']} has no current inspected approval: " + "; ".join(drifted) +
-                                   f". Re-inspect and run: dmd approve {c['id']} --note '<what you inspected>'")
+                reason = approval_reason(t, c)
+                if reason:
+                    raise DmdError(f"{c['id']} {reason}")
                 if red and (not c.get("regression") or not c.get("red_match")):
                     raise DmdError(f"{c['id']}: --red requires a regression check with an intentional failure match")
                 plan.append((c, signature, digest(check_definition(c))))
@@ -144,6 +163,10 @@ def _run(directory, ids, everything, red, quiet_window, wait_exclusive):
             t = load_task(directory)
             if t["state"] in SUSPENDED:
                 raise DmdError("execution is suspended; operator-authorized activation required")
+            for c, signature, definition in plan:
+                current = get(t["checks"], c["id"])
+                if approval_reason(t, current) or approval_signature(current) != signature:
+                    raise DmdError("approval changed during preflight; inspect and retry")
             t["running"] = {"token": token, "checks": [c["id"] for c in checks], "check": checks[0]["id"],
                             "started": now(), "source": fps, "candidates": candidates,
                             "pid": os.getpid(), "host": socket.gethostname(), "red": bool(red)}
@@ -185,6 +208,11 @@ def _run(directory, ids, everything, red, quiet_window, wait_exclusive):
                 print(json.dumps({"check": c["id"], "event": "start", "candidate": check_candidate(c, planned["root"]),
                                   "timeout": c["timeout"], "at": now()}), file=sys.stderr, flush=True)
                 try:
+                    with lock(directory):
+                        current_task = load_task(directory)
+                        current = get(current_task["checks"], c["id"])
+                        if approval_reason(current_task, current) or approval_signature(current) != plan[index][1]:
+                            raise DmdError("approval changed while waiting for execution; inspect and retry")
                     results.append(execute(c, cancelled))
                 finally:
                     holder.__exit__(None, None, None)
@@ -207,7 +235,18 @@ def _run(directory, ids, everything, red, quiet_window, wait_exclusive):
         # The trees the planned checks tested, as they are now. A candidate a check removed
         # (its own scratch worktree) is drift, not a reason to lose every result.
         after = task_snapshot(planned, missing_ok=True)
-        moved = {path: drift(before[path], after[path]) for path in before if path in after and before[path]["fingerprint"] != after[path]["fingerprint"]}
+        outputs = generated_outputs(planned, [c for c, _, _ in plan[:len(results)]], before, after)
+        moved = {}
+        for path in before:
+            # Only exact output paths created (or unchanged since a prior capture) in this
+            # run may differ. The final receipt hashes them all, including their contents.
+            allowed = outputs.get(path, {})
+            b = dict(before[path], files={k: v for k, v in before[path]["files"].items() if k not in allowed})
+            a = dict(after[path], files={k: v for k, v in after[path]["files"].items() if k not in allowed})
+            delta = drift(b, a)
+            if delta["changed_total"] or delta["head_before"] != delta["head_after"] or after[path]["fingerprint"].startswith("missing:"):
+                moved[path] = delta
+        final_fps = {path: snap["fingerprint"] for path, snap in after.items()}
         # Executed evidence is at stake here: wait longer than a routine mutation would.
         with lock(directory, wait=max(lock_wait(), FINISH_LOCK_WAIT_SECONDS)):
             t = load_task(directory)
@@ -219,7 +258,7 @@ def _run(directory, ids, everything, red, quiet_window, wait_exclusive):
                 cand = check_candidate(c, t["root"])
                 candidate_drift = moved.get(cand) or next((moved[p] for p in moved if Path(p) in Path(cand).parents), None)
                 try:
-                    approval_moved = approval_signature(current) != signature
+                    approval_moved = approval_signature(current) != signature or bool(approval_reason(t, current))
                 except DmdError:
                     approval_moved = True  # a declared input vanished: the approved definition no longer exists as inspected
                 definition_changed = digest(check_definition(current)) != definition or approval_moved
@@ -242,7 +281,9 @@ def _run(directory, ids, everything, red, quiet_window, wait_exclusive):
                                                      "candidate": cand, "head": before[cand]["head"] if cand in before else None,
                                                      "source": fps.get(cand), "started": (t.get("running") or {}).get("started"),
                                                      "metadata": metadata, "stale": reason}, indent=2) + "\n\n" + result["output"], "command")
-                receipt = {"kind": "command", "source": source_for(fps, c), "candidate": cand,
+                receipt = {"kind": "command", "source": source_for(fps if changed else final_fps, c), "candidate": cand,
+                           "assurance_version": 2, "approval": signature,
+                           "outputs": {p: d for p, d in outputs.get(cand, {}).items() if output_match(p, c.get("writes") or [])},
                            "head": before[cand]["head"] if cand in before else None,
                            "definition": definition, "artifact": art,
                            "exit": result["exit"], "matched": matched, "failure": failure,
@@ -261,6 +302,14 @@ def _run(directory, ids, everything, red, quiet_window, wait_exclusive):
                 runs.append({"at": now(), "red": red, "artifact": art, "result": label})
                 if len(runs) > MAX_RUNS_PER_CHECK:
                     del runs[:-MAX_RUNS_PER_CHECK]
+                if not success:
+                    history = t.setdefault("attempts", {}).setdefault(c["id"], [])
+                    failure_identity = {"exit": result["exit"], "failure": failure, "matched": matched,
+                                        "output": digest(result["output"])}
+                    history.append({"at": now(), "signature": digest(failure_identity), "origin": "runner",
+                                    "failure": failure or ("expected red baseline not observed" if red else "exit or success match failed"),
+                                    "strategy": c["command"], "artifact": art})
+                    del history[:-MAX_RUNS_PER_CHECK]
                 all_ok = all_ok and success
                 row = {"check": c["id"], "result": label, "exit": result["exit"], "matched": matched,
                        "failure": failure, "duration_s": result["duration_s"], "candidate": cand,

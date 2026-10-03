@@ -2,7 +2,6 @@
 """Preview/apply exact hook registrations. Preserve unrelated settings; explicit --apply only."""
 from __future__ import annotations
 import argparse
-import fcntl
 import json
 import os
 import shlex
@@ -16,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dmdlib.storage import DmdError, atomic, digest, lock, private_dir, read_json
 
 # Event names this installer registers; also used to recognize its own orphaned registrations.
-EVENTS = {"session-start", "stop", "task-completed", "pre-tool-use", "post-tool-use", "post-tool-failure"}
+EVENTS = {"user-prompt-submit", "session-start", "stop", "task-completed", "pre-tool-use", "post-tool-use", "post-tool-failure"}
 
 
 def validate(data):
@@ -69,6 +68,8 @@ def main(argv=None):
     p.add_argument("--state-dir", default=os.environ.get("DMD_STATE", str(Path.home() / ".local/state/done-means-done")))
     p.add_argument("--apply", action="store_true")
     p.add_argument("--remove", action="store_true")
+    p.add_argument("--mode", choices=["enforce", "observe"], default="enforce",
+                   help="installed hook mode (default enforce; explicit observe opt-out)")
     p.add_argument("--link-bin", nargs="?", const=str(Path.home() / ".local/bin"), metavar="DIR",
                    help="symlink bin/dmd into DIR (default ~/.local/bin) so `dmd` is on PATH in every shell and tool call")
     p.add_argument("--no-hooks", action="store_true", help="leave settings.json alone; only manage the PATH link")
@@ -85,13 +86,14 @@ def main(argv=None):
     runtime = Path(__file__).resolve().parents[1] / "bin/dmd"
     command = shlex.join(["env", "DMD_STATE=" + str(state), sys.executable, str(runtime), "hook"])
     desired = [
+        ("UserPromptSubmit", None, command + " user-prompt-submit", 10),
         ("SessionStart", None, command + " session-start", 30),
         ("Stop", None, command + " stop", 30),
         ("TaskCompleted", None, command + " task-completed", 30),
         # Asks the operator before a command changes their contract (dmdlib/authority.py).
-        ("PreToolUse", "Bash", command + " pre-tool-use", 10),
+        ("PreToolUse", "Edit|Write|Bash", command + " pre-tool-use", 10),
         ("PostToolUse", "Edit|Write|Bash", command + " post-tool-use", 10),
-        ("PostToolUseFailure", "Bash", command + " post-tool-failure", 10),
+        ("PostToolUseFailure", "Edit|Write|Bash", command + " post-tool-failure", 10),
     ]
     manifest_path = state / "installations" / (digest(str(path)) + ".json")
     link = Path(os.path.realpath(Path(args.link_bin).expanduser())) / "dmd" if args.link_bin else None
@@ -170,7 +172,7 @@ def main(argv=None):
         if not hooks:
             data.pop("hooks", None)
         if not args.apply:
-            print(json.dumps({"preview": True, "settings": str(path), "remove": args.remove, "bin_link": bin_link, "result": data}, indent=2))
+            print(json.dumps({"preview": True, "settings": str(path), "remove": args.remove, "bin_link": bin_link, "mode": args.mode, "result": data}, indent=2))
             return 0
         # Detect ordinary concurrent changes before replacement; external writers
         # that ignore this installer lock are not a transactionally isolated service.
@@ -183,7 +185,20 @@ def main(argv=None):
             print("settings unchanged")
         private_dir(manifest_path.parent)
         atomic(manifest_path, json.dumps({"settings": str(path), "commands": [] if args.remove else [x[2] for x in desired], "bin_link": bin_link}, indent=2))
-        print("hook registrations removed; state preserved" if args.remove else "hook registrations installed; use dmd config to select observe/enforce")
+        if not args.remove:
+            with lock(state):
+                config_path = state / "config.json"
+                config = read_json(config_path) if config_path.exists() else {}
+                if not isinstance(config, dict):
+                    raise DmdError("config.json must be an object")
+                config.update(mode=args.mode, max_no_progress=config.get("max_no_progress", 6))
+                config.pop("pending", None)
+                from dmdlib.store import config_errors
+                errors = config_errors(config)
+                if errors:
+                    raise DmdError("; ".join(errors))
+                atomic(config_path, json.dumps(config, indent=2))
+        print("hook registrations removed; state preserved" if args.remove else "hook registrations installed in " + args.mode + " mode")
         return 0
     try:
         if args.apply:

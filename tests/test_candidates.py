@@ -94,18 +94,21 @@ class CandidateCase(GitFixture):
         self.assertEqual(receipt["head"], head); self.assertEqual(receipt["candidate"], str(self.repo.resolve()))
         report, _ = self.cmd("report"); self.assertIn(f"Tested: {self.repo.resolve()} @ {head}", report)
 
-    def test_legacy_receipt_without_candidate_still_accepted_for_root_checks(self):
+    def test_legacy_receipt_is_never_accepted_without_a_reapproved_rerun(self):
         self.setup_task(); self.cmd("run", "A-01", *QUIET)
         d = locate(self.repo); t = load_task(d)
-        # Simulate a record written before 0.5.0: no candidate field, receipt digest over
-        # the old field set. The upgrade must keep that green accepted.
-        from dmdlib.model import check_definition, CHECK_FIELDS; from dmdlib.storage import digest
-        c = t["checks"][0]; c.pop("candidate"); c.pop("exclusive"); c["receipt"].pop("candidate"); c["receipt"].pop("head")
+        # Simulate a record written before confirmed-approval binding: no candidate field,
+        # receipt digest over the old field set, no assurance version.
+        from dmdlib.model import CHECK_FIELDS; from dmdlib.storage import digest
+        c = t["checks"][0]; c.pop("candidate"); c.pop("exclusive")
+        for key in ("candidate", "head", "assurance_version", "approval", "outputs"):
+            c["receipt"].pop(key, None)
         c["receipt"]["definition"] = digest({k: c.get(k) for k in CHECK_FIELDS})
-        self.assertEqual(digest(check_definition(c)), c["receipt"]["definition"])
         (d / "task.json").write_text(json.dumps(t))
         g = json.loads(self.cmd("status", "--json")[0])["gate"]
-        self.assertFalse(any(r.startswith("A-01:") for r in g["reasons"]), g["reasons"])
+        line = next(r for r in g["reasons"] if r.startswith("A-01:"))
+        self.assertIn("predates confirmed approvals", line)
+        self.assertIn("A-01", g["summary"]["checks"]["stale"])
 
     def test_source_for_falls_back_to_the_enclosing_candidate(self):
         fps = {"/a/b": "x"}
@@ -249,7 +252,7 @@ class PreflightCase(GitFixture):
     def test_another_tasks_live_run_on_the_same_candidate_is_refused(self):
         other = self.linked_worktree(); self.setup_task()
         self.cmd("--cwd", str(other), "init", "-m", "other", "--authority", "op")
-        self.cmd("--cwd", str(other), "req", "add", "r", "--anchor", "a"); self.cmd("--cwd", str(other), "work", "add", "w", "--req", "R-01")
+        self.cmd("--cwd", str(other), "req", "add", "r", "--anchor", "other"); self.cmd("--cwd", str(other), "work", "add", "w", "--req", "R-01")
         self.cmd("--cwd", str(other), "check", "add", "--req", "R-01", "--work", "W-01", "--cmd", "python3 -B verify.py", "--run-cwd", str(self.repo), "--expect", "x", "--match", "ACCEPTANCE_PASS:1")
         d = locate(other); t = load_task(d)
         t["running"] = {"token": "x", "check": "A-01", "checks": ["A-01"], "started": "now", "source": {}, "candidates": [str(self.repo.resolve())],
@@ -304,7 +307,7 @@ class ExclusiveCase(GitFixture):
         t = load_task(locate(self.repo)); self.assertIsNone(t["running"]); self.assertEqual(t["checks"][0]["status"], "PASS")
 
     def test_invalid_tag_is_refused(self):
-        self.cmd("init", "-m", "x", "--authority", "op"); self.cmd("req", "add", "r", "--anchor", "a"); self.cmd("work", "add", "w", "--req", "R-01")
+        self.cmd("init", "-m", "x", "--authority", "op"); self.cmd("req", "add", "r", "--anchor", "x"); self.cmd("work", "add", "w", "--req", "R-01")
         self.cmd("check", "add", "--req", "R-01", "--work", "W-01", "--cmd", "python3 -B verify.py", "--expect", "x", "--match", "P", "--exclusive", "../bad", code=2)
 
 
@@ -313,7 +316,7 @@ class ListingCase(GitFixture):
     def test_group_lists(self):
         self.setup_task()
         self.cmd("finding", "add", "bug", "--location", "subject.py:1", "--status", "confirmed")
-        self.cmd("blocker", "add", "need", "--item", "W-01", "--owner", "o", "--unblock", "u", "--proof", "p")
+        self.cmd("blocker", "add", "need", "--item", "W-01", "--owner", "o", "--unblock", "u", "--proof", "p", "--evidence", str(self.review))
         self.assertEqual(self.cmd("req", "list")[0].strip(), "R-01 [active] Value is 42")
         self.assertTrue(self.cmd("work", "list")[0].startswith("W-01 [todo] Implement and test value -> R-01"))
         self.assertTrue(self.cmd("check", "list")[0].startswith("A-01 [NOT_RUN] (command)"))
@@ -394,22 +397,21 @@ class ReasonCase(GitFixture):
         d = locate(self.repo); t = load_task(d)
         c = next(x for x in t["checks"] if x["id"] == cid)
         c.pop("candidate", None); c.pop("exclusive", None)
-        c["receipt"].pop("candidate"); c["receipt"].pop("head")
+        for key in ("candidate", "head", "assurance_version", "approval", "outputs"):
+            c["receipt"].pop(key, None)
         c["receipt"]["source"] = task_fingerprint(t)[str(self.repo.resolve())]  # 0.4.x bound every receipt to the task root
         c["receipt"]["definition"] = digest({k: c.get(k) for k in CHECK_FIELDS})
         (d / "task.json").write_text(json.dumps(t))
         # Make the worktree differ from the root so their fingerprints cannot coincide.
         (Path(c["cwd"]) / "notes.txt").write_text("worktree-only\n")
 
-    def test_legacy_worktree_receipt_is_still_accepted_after_the_upgrade(self):
+    def test_legacy_worktree_receipt_requires_reapproval_after_the_upgrade(self):
         other = self.linked_worktree(); self.setup_task()
         cid = self.add_check(other); self.cmd("run", cid, *QUIET); self.legacy(cid)
         g = json.loads(self.cmd("status", "--json")[0])["gate"]
-        self.assertFalse(any(r.startswith(cid + ":") for r in g["reasons"]), g["reasons"])
-        self.assertIn(cid, g["summary"]["checks"]["legacy"])
-        report, _ = self.cmd("report")
-        self.assertIn("receipt predates 0.5.0 candidate binding", report)
-        self.assertIn(f"rerun to bind it to {other}", report)
+        line = next(r for r in g["reasons"] if r.startswith(cid + ":"))
+        self.assertIn("predates confirmed approvals", line)
+        self.assertIn(cid, g["summary"]["checks"]["stale"])
 
     def test_legacy_receipt_goes_stale_with_the_root_and_says_why(self):
         other = self.linked_worktree(); self.setup_task()
@@ -417,7 +419,7 @@ class ReasonCase(GitFixture):
         (self.repo / "subject.py").write_text("VALUE = 43\n")
         g = json.loads(self.cmd("status", "--json")[0])["gate"]
         line = next(r for r in g["reasons"] if r.startswith(cid + ":"))
-        self.assertIn("predates 0.5.0", line); self.assertIn(str(other), line)
+        self.assertIn("predates confirmed approvals", line)
         self.assertIn(cid, g["summary"]["checks"]["stale"])
 
     def test_rerun_rebinds_a_legacy_receipt_to_its_worktree(self):
@@ -468,7 +470,7 @@ class ReasonCase(GitFixture):
         self.assertEqual(g["summary"]["work_unverified"], ["W-01"])
 
     def test_stop_hook_repeats_the_headline_and_rerun_command(self):
-        self.setup_task(); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
+        self.setup_task(); self.cmd("config", "--mode", "observe"); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
         (self.repo / "subject.py").write_text("VALUE = 43\n")
         out, _ = self.cmd("hook", "stop", stdin=self.payload())
         message = json.loads(out)["systemMessage"]

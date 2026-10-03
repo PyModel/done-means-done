@@ -5,7 +5,7 @@ from collections import deque
 from pathlib import Path
 from .storage import DmdError, digest, evidence_ok
 from .source import file_digest, snapshot, MissingCandidate
-from .authority import undisclosed, unconfirmed
+from .authority import decision_ok, undisclosed, unconfirmed
 
 SCHEMA = 2
 TASK_STATES = {"ACTIVE", "PAUSED", "BLOCKED", "CANCELLED", "COMPLETE"}
@@ -92,8 +92,10 @@ def extract_clauses(text, first=1, source="request"):
             fenced = not fenced
             continue
         m = None if fenced else LIST_ITEM.match(line)
-        if m and len(found) < MAX_CLAUSES:
-            found.append({"id": f"C-{first + len(found):02d}", "text": m.group(1).strip()[:300], "source": source})
+        if m:
+            if len(found) >= MAX_CLAUSES:
+                raise DmdError("request has more than 100 list items; split the assignment explicitly, never silently truncate scope")
+            found.append({"id": f"C-{first + len(found):02d}", "text": m.group(1).strip(), "source": source})
     return found
 
 def unmapped_clauses(t):
@@ -107,7 +109,8 @@ def contract(task):
         # Present only on tasks created since 0.7.0, so older contracts keep their digest.
         extra["clauses"] = [{k: c.get(k) for k in ("id", "text", "context")} for c in task["clauses"]]
     return {**extra,
-        "request": task["original_request"], "amendments": task["amendments"],
+        "request": task["original_request"], "request_provenance": task.get("request_provenance"),
+        "review_policy": task.get("require_independent_review", True), "amendments": task["amendments"],
         "requirements": task["requirements"],
         "work": [{k: w.get(k) for k in ("id", "req", "text", "deps", "owns", "removed")} for w in task["work"]],
         "checks": [dict(check_definition(c), removed=bool(c.get("removed"))) for c in task["checks"]],
@@ -127,24 +130,14 @@ def task_candidates(task):
         found.setdefault(check_candidate(c, root), set()).update(c.get("inputs", []))
     return {path: sorted(inputs) for path, inputs in found.items()}
 
-def candidate_outputs(task):
-    """Output globs declared by live checks, per candidate. They leave the candidate's
-    fingerprint for every check on it: a generated report is not source."""
-    found = {}
-    for c in live(task["checks"]):
-        if c.get("writes"):
-            found.setdefault(check_candidate(c, task["root"]), set()).update(c["writes"])
-    return {path: sorted(globs) for path, globs in found.items()}
-
 def task_snapshot(task, missing_ok=False):
     """One snapshot per candidate. With `missing_ok`, a candidate that no longer exists is
     recorded as drift instead of raising, so a run whose check removed its own scratch
     tree can still write its receipts."""
-    outputs = candidate_outputs(task)
     found = {}
     for path, inputs in task_candidates(task).items():
         try:
-            found[path] = snapshot(Path(path), inputs, exclude=outputs.get(path, ()))
+            found[path] = snapshot(Path(path), inputs)
         except MissingCandidate:
             if not missing_ok:
                 raise
@@ -295,16 +288,6 @@ def legacy_receipt(c):
     r = c.get("receipt") or {}
     return bool(r) and "candidate" not in r
 
-def _legacy_source_current(r, fp, root):
-    """Whether a pre-0.5.0 receipt still holds the guarantee that release gave it: the task
-    root is unchanged. Root-bound checks rebind exactly; a worktree check keeps 0.4.x
-    semantics (blind to the worktree) until it is rerun, and the report says so."""
-    if not isinstance(fp, dict):
-        return r.get("source") == fp
-    if root is not None:
-        return r.get("source") == fp.get(str(Path(root)))
-    return r.get("source") in fp.values()
-
 def missing_inputs(c):
     """Declared inputs of one check that no longer exist on disk."""
     found = []
@@ -316,7 +299,7 @@ def missing_inputs(c):
             found.append(str(path))
     return found
 
-def check_verdict(task_dir, c, fp, root=None):
+def check_verdict(task_dir, c, fp, root=None, task=None):
     """(None, None) when the check's evidence is currently accepted; otherwise a typed cause
     and one specific reason. A reader must never have to guess between not run, failed,
     stale, edited and predates-the-upgrade: each is a different next action."""
@@ -337,37 +320,45 @@ def check_verdict(task_dir, c, fp, root=None):
         return "failed", "FAIL: " + (str(r.get("failure")) if r.get("failure") else "exit or match failed") + "; fix and rerun"
     if r.get("definition") != digest(check_definition(c)):
         return "edited", "definition edited since the receipt; approve and rerun"
+    if r.get("assurance_version") != 2:
+        return "stale", "legacy receipt predates confirmed approvals/full output binding; reapprove and rerun"
     if r.get("source") != source_for(fp, c):
         cand = check_candidate(c, root)
-        if legacy_receipt(c):
-            if not _legacy_source_current(r, fp, root):
-                return "stale", f"receipt predates 0.5.0 candidate binding and the task root has since changed; rerun to bind it to {cand}"
-        else:
-            head = r.get("head") or "no-head"
-            return "stale", f"stale: {cand} changed since the receipt (tested @ {head}); rerun"
+        head = r.get("head") or "no-head"
+        return "stale", f"stale: {cand} changed since the receipt (tested @ {head}); rerun"
     if not evidence_ok(task_dir, r.get("artifact")):
         return "other", "evidence artifact missing or altered; rerun"
     if c["method"] == "command":
+        if task is not None:
+            from .runner import approval_reason
+            reason = approval_reason(task, c)
+            if reason:
+                return "edited", reason
+            if r.get("approval") != (task["approvals"].get(c["id"]) or {}).get("signature"):
+                return "edited", "receipt used another approval; rerun the confirmed verifier"
         if not (r.get("kind") == "command" and r.get("exit") == 0 and r.get("matched") is True and r.get("failure") is None):
             return "other", "receipt is not a clean command pass; rerun"
     elif not (r.get("kind") == c["method"] and r.get("note")):
         return "other", "attestation has no recorded observation"
     return None, None
 
-def acceptance_reason(task_dir, c, fp, root=None):
-    return check_verdict(task_dir, c, fp, root)[1]
+def acceptance_reason(task_dir, c, fp, root=None, task=None):
+    return check_verdict(task_dir, c, fp, root, task)[1]
 
-def accepted(task_dir, c, fp, root=None):
-    return acceptance_reason(task_dir, c, fp, root) is None
-
-def red_ok(task_dir, c):
+def red_ok(task_dir, c, task=None):
     red = c.get("red") or {}
-    if red.get("definition") == digest(check_definition(c)) and red.get("matched") is True and red.get("failure") is None and red.get("exit") == c.get("red_exit") and evidence_ok(task_dir, red.get("artifact")):
+    if task is not None:
+        from .runner import approval_reason
+        if approval_reason(task, c):
+            return False
+    if (red.get("assurance_version") == 2 and (task is None or red.get("approval") == (task["approvals"].get(c["id"]) or {}).get("signature"))) and red.get("definition") == digest(check_definition(c)) and red.get("matched") is True and red.get("failure") is None and red.get("exit") == c.get("red_exit") and evidence_ok(task_dir, red.get("artifact")):
         return True
     baseline = c.get("baseline") or {}
-    return bool(baseline.get("reason")) and baseline.get("definition") == digest(check_definition(c)) and evidence_ok(task_dir, baseline.get("artifact"))
+    return (bool(baseline.get("reason")) and baseline.get("definition") == digest(check_definition(c))
+            and evidence_ok(task_dir, baseline.get("artifact")) and task is not None
+            and decision_ok(task, baseline.get("decision"), "check.baseline", c["id"], baseline["definition"]))
 
-EVIDENCE_IDENTITY = ("kind", "source", "definition", "candidate", "exit", "matched", "failure", "note", "stale", "reason")
+EVIDENCE_IDENTITY = ("kind", "source", "definition", "candidate", "exit", "matched", "failure", "note", "stale", "reason", "approval", "assurance_version")
 
 def evidence_identity(record):
     """What a review actually vouched for in a receipt, red run or baseline: the tree and
@@ -408,8 +399,8 @@ class Assessment:
     def __init__(self, task_dir, t, fp):
         self.task_dir, self.t, self.fp = task_dir, t, fp
         root = t["root"]
-        self.verdicts = {c["id"]: check_verdict(task_dir, c, fp, root) for c in t["checks"]}
-        self.red = {c["id"]: red_ok(task_dir, c) for c in live(t["checks"]) if c.get("regression")}
+        self.verdicts = {c["id"]: check_verdict(task_dir, c, fp, root, task=t) for c in t["checks"]}
+        self.red = {c["id"]: red_ok(task_dir, c, task=t) for c in live(t["checks"]) if c.get("regression")}
         self.active = sorted(r["id"] for r in t["requirements"] if r["status"] == "active")
         self._work_ok = {}
         for w in t["work"]:
@@ -463,6 +454,14 @@ class Assessment:
                 if status == "duplicate":
                     if not f.get("note"):
                         reason = "duplicate needs rationale"; break
+                    if f.get("confirmed_at"):
+                        cs = f.get("duplicate_checks") or []
+                        target = rows.get(f.get("duplicate")) or {}
+                        shared = set(f.get("checks", [])) & set(target.get("checks", []))
+                        if (not cs or not set(cs) <= shared or not all(self.accepted(c) and not attested(get(t["checks"], c)) for c in cs)
+                                or not evidence_ok(self.task_dir, f.get("artifact"))
+                                or not decision_ok(t, f.get("duplicate_decision"), "finding.duplicate", f["id"], digest([f.get("duplicate"), sorted(cs)]))):
+                            reason = "confirmed duplicate needs shared executed evidence and operator-confirmed disposition"; break
                     current = f.get("duplicate"); continue
                 if status == "deferred":
                     if not f.get("note") or not _text(f.get("authority")):
@@ -511,7 +510,7 @@ class Assessment:
         """Items that wait on an unresolved blocker: blocked directly, through their
         requirement, or through a prerequisite (transitively)."""
         t = self.t
-        direct = {b["item"] for b in t["blockers"] if not b.get("resolved")}
+        direct = {b["item"] for b in t["blockers"] if not b.get("resolved") and self.blocker_supported(b)}
         if "task" in direct:
             return {"*"}
         waiting = set(direct)
@@ -530,6 +529,10 @@ class Assessment:
                 waiting.add(f["id"])
         return waiting
 
+    def blocker_supported(self, b):
+        return (evidence_ok(self.task_dir, b.get("artifact")) and
+                (b["item"] != "task" or decision_ok(self.t, b.get("decision"), "blocker.task", b["id"], digest(b["artifact"]))))
+
     def waits(self, owner):
         return "*" in self.blocked or owner in self.blocked
 
@@ -544,8 +547,8 @@ class Assessment:
         if loose:
             named = "; ".join(f"{c['id']} {c['text'][:60]!r}" for c in loose[:5]) + (f" (+{len(loose) - 5} more)" if len(loose) > 5 else "")
             self._add("coverage", f"coverage: request items with no requirement: {named}")
-        elif cov.get("digest") != contract_digest(t):
-            self._add("coverage", "coverage: reconcile the original request and current obligation inventory")
+        elif not self.coverage_ok():
+            self._add("coverage", "coverage: reconcile the full request and obtain operator confirmation of the current inventory")
         if not self.active:
             self._add("task", "no active requirements; an empty ledger cannot complete")
         self.executed_total = self.attested_total = 0
@@ -580,6 +583,8 @@ class Assessment:
         for b in t["blockers"]:
             if not b.get("resolved"):
                 self._add(b["id"], f"{b['id']}: unresolved prerequisite for {b['item']}")
+                if not self.blocker_supported(b):
+                    self._add("blocker-evidence", f"{b['id']}: blocker evidence or task-wide operator confirmation missing")
         for u in t["uncertain"]:
             if not u.get("resolved"):
                 self._add(u["id"], f"{u['id']}: unknown external outcome")
@@ -588,14 +593,21 @@ class Assessment:
         for e in unconfirmed(t):
             self._add(e["id"], f"{e['id']}: {e['op']} {e['target']} awaits the operator's confirmation")
 
+    def coverage_ok(self):
+        cov = self.t.get("coverage") or {}
+        return (cov.get("digest") == contract_digest(self.t) and decision_ok(
+            self.t, cov.get("decision"), "coverage.assert", "coverage", cov.get("digest")))
+
     def review_reason(self, require_review=True):
         if not require_review:
             return None
         r = self.t.get("review") or {}
         if r.get("signature") != review_signature(self.t, self.fp) or not evidence_ok(self.task_dir, r.get("artifact")):
             return "review: final request/diff/integration review missing or stale"
-        if self.t.get("require_independent_review") and r.get("kind") != "independent":
+        if self.t.get("require_independent_review", True) and r.get("kind") != "independent":
             return "review: independent review required; self-review is not independent"
+        if r.get("kind") == "independent" and not decision_ok(self.t, r.get("decision"), "review.independent", "review", digest([r["signature"], r["artifact"]])):
+            return "review: independent reviewer provenance awaits operator confirmation"
         return None
 
     def actionable(self):
@@ -621,7 +633,9 @@ class Assessment:
         actionable_owners = set(owners)
         result = []
         for owner in owners:
-            if owner == "coverage":
+            if owner == "blocker-evidence":
+                action = "record actual prerequisite evidence; a task-wide blocker also needs operator confirmation (clear and re-add unsupported legacy blockers)"
+            elif owner == "coverage":
                 loose = unmapped_clauses(t)
                 if loose:
                     first = loose[0]["id"]
@@ -731,7 +745,7 @@ class Assessment:
         loose = unmapped_clauses(t)
         if loose:
             parts.append(f"{len(loose)} request item(s) unmapped")
-        elif (t.get("coverage") or {}).get("digest") != contract_digest(t):
+        elif not self.coverage_ok():
             parts.append("coverage not asserted")
         uncovered = [rid for rid in self.active if not any(c["req"] == rid for c in live(t["checks"]))]
         if uncovered:
@@ -767,7 +781,7 @@ class Assessment:
         done += [w["id"] for w in live(t["work"]) if self.work_ok(w["id"])]
         done += [f["id"] for f in t["findings"] if f["id"] not in self.findings]
         done += [x["id"] for x in t["blockers"] + t["uncertain"] if x.get("resolved")]
-        if (t.get("coverage") or {}).get("digest") == contract_digest(t):
+        if self.coverage_ok():
             done.append("coverage")
         return sorted(done)
 
@@ -810,8 +824,9 @@ def evaluate(task_dir, t, fp=None, require_review=True):
         reasons.append(review)
     nxt = a.next_actions()
     if review and not a.reasons:
-        nxt.append({"id": "review", "action": "review the request, the final diff and the integrated result, then dmd review --kind self "
-                    "--reviewer '<who reviewed>' --note '<what was reviewed>' --evidence /abs/review.txt"})
+        kind = "independent" if t.get("require_independent_review", True) else "self"
+        nxt.append({"id": "review", "action": "review the request, the final diff and the integrated result, then dmd review --kind " + kind +
+                    " --reviewer '<who reviewed>' --note '<what was reviewed>' --evidence /abs/review.txt"})
     status = "COMPLETE" if not reasons else ("ACTIVE" if nxt else a.status(reasons))
     if status == "ACTIVE" and not nxt:
         # Open reasons with no dependency-ready item mean the plan itself is stuck (a cycle
@@ -819,5 +834,7 @@ def evaluate(task_dir, t, fp=None, require_review=True):
         # to fix, and it must be told so rather than blocked with nothing to do.
         nxt.append({"id": "plan", "action": "no dependency-ready item; replan around: " + "; ".join(reasons[:3])})
     return {"status": status, "reasons": reasons, "next": nxt, "source": fp,
-            "attestation": {"executed": a.executed_total, "self_attested": a.attested_total},
+            "attestation": {"executed": a.executed_total, "self_attested": a.attested_total,
+                            "meaning": "command capture, not semantic proof; operator-confirmed scope and verifier inspection required"},
+            "request_provenance": t.get("request_provenance", {"kind": "legacy-agent-transcribed"}),
             "summary": a.summary(bool(review))}, a

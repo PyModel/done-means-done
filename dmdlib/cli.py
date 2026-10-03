@@ -23,7 +23,8 @@ from .store import (prune_empty_record_dirs, base_dir, bind_session, bindings, c
                     DEFAULT_CONFIG, authority_channel, prune_run_index, prune_tickets, pid_alive, prune_sessions, rebind_sessions, remember_session, unindex_run,
                     withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
-from .authority import effective, find, record, terminal_confirms, withdraw as authority_withdraw
+from . import authority
+from .authority import effective, find, record, withdraw as authority_withdraw
 
 def need(args):
     directory = locate(args.cwd, args.task)
@@ -69,10 +70,12 @@ def read_operator_file(path, name):
 
 
 def init(args):
+    if sum(bool(x) for x in (args.message, args.request_file, args.from_host)) != 1:
+        raise DmdError("choose one request source: -m, --request-file, or --from-host")
     message = read_operator_file(args.request_file, "--request-file") if args.request_file else args.message
-    directory, t = create_task(args.cwd, args.task, require_text(message, "request (-m TEXT or --request-file PATH)"),
+    directory, t = create_task(args.cwd, args.task, "" if args.from_host else require_text(message, "request"),
                                require_text(args.authority, "--authority"), session=args.session, new=args.new,
-                               require_review=args.independent_review)
+                               require_review=True, from_host=args.from_host)
     print(t["task_id"])
 
 
@@ -81,9 +84,14 @@ def req(args):
         return listing(args, "requirements")
     with edit(args, "req." + args.action) as (_, t):
         if args.action == "add":
+            anchor = require_text(args.anchor, "--anchor to the original request")
+            sources = [t["original_request"]] + [a["text"] for a in t["amendments"] if authority.decision_ok(
+                t, a.get("decision"), "amend", a.get("source"), digest(a["text"]))]
+            if not any(anchor in text for text in sources):
+                raise DmdError("--anchor must be an exact quote from the request or a confirmed amendment")
             rid = new_id(t["requirements"], "R")
             t["requirements"].append({"id": rid, "text": require_text(args.text, "requirement"),
-                                      "anchor": require_text(args.anchor, "--anchor to the original request"), "status": "active"})
+                                      "anchor": anchor, "status": "active"})
             if args.covers:
                 t["requirements"][-1]["covers"] = sorted(set(args.covers))
             print(rid)
@@ -246,7 +254,7 @@ def work(args):
                     raise DmdError("dependencies must have current verification before work starts/closes")
                 if args.status == "verified":
                     cs = [c for c in live(t["checks"]) if w["id"] in c["work"]]
-                    owed = {c["id"]: acceptance_reason(directory, c, fp, t["root"]) for c in cs}
+                    owed = {c["id"]: acceptance_reason(directory, c, fp, t["root"], task=t) for c in cs}
                     owed = {k: v for k, v in owed.items() if v}
                     if not cs or owed:
                         detail = "; ".join(f"{k}: {v}" for k, v in owed.items()) or "no mapped check"
@@ -285,6 +293,7 @@ def check(args):
                 t["checks"].append(c)
             else:
                 c = get(t["checks"], args.id)
+                prior_check = copy.deepcopy(c)
                 c.setdefault("history", []).append({"definition": check_definition(c), "receipt": c.get("receipt"), "at": now()})
                 for flag, key in [("req", "req"), ("work", "work"), ("method", "method"), ("cmd", "command"),
                                   ("run_cwd", "cwd"), ("expect", "expect"), ("match", "match"), ("timeout", "timeout"),
@@ -342,14 +351,14 @@ def check(args):
                     raise DmdError(f"--match {c['match']!r} appears in the command text, so the command prints it without "
                                    "observing anything. Match a string the verifier's own output emits after its assertions "
                                    "(a test runner's summary line, a script's final print)")
+            if args.action == "edit" and args.no_regression and prior_check.get("regression"):
+                operator_decision(t, "check.no-regression", c["id"], args.note or "remove regression protection",
+                                  {"record": prior_check}, digest(check_definition(c)))
             if args.approve is not None:
-                # One call for author-and-approve. The inspection it attests is the same as
-                # dmd approve; an edit still clears it, so edited text never runs uninspected.
                 if c["method"] != "command":
                     raise DmdError("--approve applies only to command checks")
-                t["approvals"][c["id"]] = {"signature": digest(approval_parts(c)), "parts": approval_parts(c),
-                                           "note": require_text(args.approve, "--approve note naming what you inspected"), "at": now()}
-            print(c["id"] + (" (approved)" if args.approve is not None else ""))
+                inspected_approval(t, c, args.approve)
+            print(c["id"] + (" (approved; execution still requires operator confirmation when a channel exists)" if args.approve is not None else ""))
         elif args.action == "set":
             c = get(t["checks"], args.id)
             if c.get("needs_review") and args.status == "PASS":
@@ -363,7 +372,7 @@ def check(args):
             if args.status == "PASS":
                 art = artifact_from_file(directory, args.evidence)
                 fp = task_fingerprint(t)
-                c["receipt"] = {"kind": c["method"], "source": source_for(fp, c), "candidate": check_candidate(c, t["root"]),
+                c["receipt"] = {"kind": c["method"], "assurance_version": 2, "source": source_for(fp, c), "candidate": check_candidate(c, t["root"]),
                                 "definition": digest(check_definition(c)),
                                 "artifact": art, "note": args.note, "at": now()}
             else:
@@ -372,8 +381,31 @@ def check(args):
             c = get(t["checks"], args.id)
             if not c.get("regression"):
                 raise DmdError("baseline limitation applies only to a regression check")
+            prior = {"baseline": copy.deepcopy(c.get("baseline"))}
             c["baseline"] = {"definition": digest(check_definition(c)), "reason": require_text(args.note, "baseline limitation --note"),
                              "artifact": artifact_from_file(directory, args.evidence), "at": now()}
+            entry = operator_decision(t, "check.baseline", c["id"], c["baseline"]["reason"], prior, c["baseline"]["definition"])
+            c["baseline"]["decision"] = entry["id"]
+
+
+def inspected_approval(t, c, note):
+    parts = approval_parts(c)
+    signature = digest(parts)
+    old = t["approvals"].get(c["id"]) or {}
+    note = require_text(note, "inspection --note")
+    if old.get("signature") == signature and authority.decision_ok(t, old.get("decision"), "check.approve", c["id"], signature):
+        old.update(note=note, at=now())
+        print(c["id"] + " unchanged approved definition; operator confirmation reused")
+        return
+    # Superseded requests cannot keep blocking forever, nor confer authority on a new verifier.
+    for e in authority.unconfirmed(t):
+        if e["op"] == "check.approve" and e["target"] == c["id"]:
+            e["withdrawn"] = now()
+    entry = operator_decision(t, "check.approve", c["id"], note, {}, signature)
+    t["approvals"][c["id"]] = {"signature": signature, "parts": parts, "note": note,
+                               "at": now(), "decision": entry["id"]}
+    print(c["id"] + " approved for the exact displayed definition, inputs and environment; "
+          "counts once the operator confirms it")
 
 
 def approve(args):
@@ -381,10 +413,7 @@ def approve(args):
         c = get(t["checks"], args.id)
         if c.get("needs_review") or c["method"] != "command":
             raise DmdError("check must be a fully authored command check")
-        parts = approval_parts(c)
-        t["approvals"][c["id"]] = {"signature": digest(parts), "parts": parts,
-                                   "note": require_text(args.note, "inspected approval --note"), "at": now()}
-        print(c["id"] + " approved for the exact displayed definition and environment")
+        inspected_approval(t, c, args.note)
 
 
 def preview(args):
@@ -428,6 +457,7 @@ def finding(args):
             operator_decision(t, "finding.defer", f["id"], f["authority"], prior)
         else:
             f = get(t["findings"], args.id)
+            prior_finding = copy.deepcopy(f)
             if args.status in OPERATOR_FINDING_STATES:
                 raise DmdError(f"{args.status} requires operator authority: use dmd finding defer --id {f['id']} --authority '...' --note '...'")
             if args.status:
@@ -460,7 +490,18 @@ def finding(args):
                     raise DmdError(reason)
             if f["status"] == "duplicate":
                 target = require_text(args.duplicate, "--duplicate canonical finding ID")
-                get(t["findings"], target)
+                canonical = get(t["findings"], target)
+                if f.get("confirmed_at"):
+                    common = set(f.get("checks", [])) & set(canonical.get("checks", []))
+                    assessment = assess(directory, t, task_fingerprint(t))
+                    shared = [cid for cid in common if assessment.accepted(cid) and not attested(get(t["checks"], cid))]
+                    if not shared:
+                        raise DmdError("confirmed duplicate needs shared current executed evidence with its canonical finding")
+                    f["artifact"] = artifact_from_file(directory, args.evidence)
+                    entry = operator_decision(t, "finding.duplicate", f["id"], args.note,
+                                              {"record": prior_finding}, digest([target, sorted(shared)]))
+                    f["duplicate_decision"] = entry["id"]
+                    f["duplicate_checks"] = sorted(shared)
                 f["duplicate"] = target
                 seen, cursor = set(), f["id"]
                 while cursor:
@@ -479,7 +520,7 @@ def finding(args):
 def blocker(args):
     if args.action == "list":
         return listing(args, "blockers")
-    with edit(args, "blocker." + args.action) as (_, t):
+    with edit(args, "blocker." + args.action) as (directory, t):
         if args.action == "add":
             item = require_text(args.item, "--item naming 'task' or the R/W/A/F ID that is blocked")
             if item != "task":
@@ -489,7 +530,11 @@ def blocker(args):
             bid = new_id(t["blockers"], "B")
             t["blockers"].append({"id": bid, "item": item, "text": require_text(args.text, "concrete missing prerequisite"),
                                   "owner": require_text(args.owner, "--owner"), "unblock": require_text(args.unblock, "--unblock"),
-                                  "proof": require_text(args.proof, "--proof of the unavailable prerequisite"), "resolved": False})
+                                  "proof": require_text(args.proof, "--proof of the unavailable prerequisite"),
+                                  "artifact": artifact_from_file(directory, args.evidence), "resolved": False})
+            if item == "task":
+                entry = operator_decision(t, "blocker.task", bid, args.proof, {}, digest(t["blockers"][-1]["artifact"]))
+                t["blockers"][-1]["decision"] = entry["id"]
             print(bid)
         else:
             b = get(t["blockers"], args.id)
@@ -531,6 +576,7 @@ def coverage(args):
             if not args.item:
                 raise DmdError("name at least one request item ID (C-XX); dmd coverage items lists them")
             clauses = [get(t.get("clauses") or [], cid) for cid in args.item]
+            prior = {"clauses": copy.deepcopy(clauses)}
             if args.action == "map":
                 r = get(t["requirements"], require_text(args.req, "--req naming the requirement that covers them"))
                 r["covers"] = sorted(set(r.get("covers") or []) | {c["id"] for c in clauses})
@@ -539,6 +585,8 @@ def coverage(args):
                 clause.pop("context", None)
                 if note:
                     clause["context"] = note
+            if args.action == "context":
+                operator_decision(t, "coverage.context", ",".join(sorted(args.item)), args.authority or note, prior)
             print(", ".join(c["id"] for c in clauses) + (" -> " + args.req if args.action == "map" else " marked context"))
     else:
         with edit(args, "coverage.assert") as (_, t):
@@ -549,8 +597,11 @@ def coverage(args):
                 raise DmdError("request items have no requirement: " + ", ".join(c["id"] for c in loose) +
                                ". Map each (req add --covers C-XX, or coverage map C-XX --req R-XX) or mark it "
                                "context (coverage context C-XX --note ...); dmd coverage items lists them")
+            prior = {"coverage": copy.deepcopy(t.get("coverage"))}
             t["coverage"] = {"digest": contract_digest(t), "note": require_text(args.note, "request-to-record mapping --note"), "at": now()}
-        print("coverage recorded; semantic completeness still requires source-request review")
+            entry = operator_decision(t, "coverage.assert", "coverage", t["coverage"]["note"], prior, t["coverage"]["digest"])
+            t["coverage"]["decision"] = entry["id"]
+        print("coverage recorded; operator must compare the full request, including prose, with every outcome")
 
 
 def review(args):
@@ -577,7 +628,9 @@ def review(args):
             t.setdefault("review_log", []).append({"at": now(), "outcome": "accepted", "kind": args.kind,
                                                    "reviewer": t["review"]["reviewer"], "note": t["review"]["note"]})
             if args.kind == "independent":
-                operator_decision(t, "review.independent", "review", t["review"]["reviewer"] + ": " + t["review"]["note"], prior)
+                entry = operator_decision(t, "review.independent", "review", t["review"]["reviewer"] + ": " + t["review"]["note"],
+                                          prior, digest([t["review"]["signature"], artifact]))
+                t["review"]["decision"] = entry["id"]
     if rejected:
         raise DmdError("review recorded as rejected; obligations remain: " + "; ".join(rejected))
     print("final review recorded")
@@ -626,9 +679,19 @@ def inspect_task(args):
 def other(args):
     with edit(args, args.command) as (directory, t):
         if args.command == "amend":
-            t["amendments"].append({"at": now(), "text": require_text(args.text, "operator amendment")})
+            amendment = {"at": now(), "text": require_text(args.text, "operator amendment")}
+            source = "amendment " + amendment["at"]
+            amendment["source"] = source
+            entry = operator_decision(t, "amend", source, args.authority or args.text,
+                                      {"amendment_at": amendment["at"], "source": source}, digest(amendment["text"]))
+            amendment["decision"] = entry["id"]
+            t["amendments"].append(amendment)
             if "clauses" in t:
-                t["clauses"] += extract_clauses(args.text, len(t["clauses"]) + 1, f"amendment {len(t['amendments'])}")
+                t["clauses"] += extract_clauses(args.text, len(t["clauses"]) + 1, source)
+        elif args.command == "review-policy":
+            prior = {"require_independent_review": t.get("require_independent_review", True)}
+            t["require_independent_review"] = args.policy == "independent"
+            operator_decision(t, "review-policy", "review-policy", require_text(args.authority, "--authority"), prior)
         elif args.command == "state":
             require_text(args.reason, "--reason recording the operator instruction or real interruption")
             if args.status == "ACTIVE" and t["state"] == "CANCELLED" and not args.authority:
@@ -689,10 +752,10 @@ def other(args):
                 print(json.dumps(found, indent=2))
 
 
-def operator_decision(t, op, target, text, prior):
+def operator_decision(t, op, target, text, prior, binding=None):
     """Log a contract change the operator must own (authority.py)."""
-    entry = record(t, op, target, text, prior, authority_channel())
-    if entry["channel"] and not entry["confirmed"]:
+    entry = record(t, op, target, text, prior, authority_channel(), binding)
+    if not entry["confirmed"]:
         print(f"{entry['id']}: takes effect once the operator approves it; the host asks them before this command runs. "
               f"If they did not, undo it: dmd authority withdraw {entry['id']}")
     return entry
@@ -717,10 +780,8 @@ def authority_command(args):
             return
         if entry.get("confirmed") or entry.get("withdrawn"):
             raise DmdError(f"{entry['id']} is already {'confirmed' if entry.get('confirmed') else 'withdrawn'}")
-        if not entry.get("channel"):
-            raise DmdError(f"{entry['id']} was recorded without a confirmation channel; it is disclosed as unconfirmed")
         entry["confirm_requested_at"] = now()
-        if terminal_confirms(f"{entry['op']} {entry['target']}: {entry['text']!r}"):
+        if authority.terminal_confirms(f"{entry['op']} {entry['target']}: {entry['text']!r}"):
             entry["confirmed"] = {"via": "terminal", "at": now()}
             print(f"{entry['id']} confirmed")
         else:
@@ -739,7 +800,7 @@ def doctor(args):
         print(json.dumps(report, indent=2)); return 1
     try:
         config = load_config(strict=False)
-        report["hook_mode"] = config.get("mode", "observe") if isinstance(config, dict) else None
+        report["hook_mode"] = config.get("mode", DEFAULT_CONFIG["mode"]) if isinstance(config, dict) else None
         report["problems"] += [f"config.json: {e}" for e in config_errors(config)]
     except DmdError as exc:
         report["problems"].append(f"config.json: {exc}")
@@ -877,7 +938,6 @@ def configuration(args):
     notice = None
     with lock(state_root()):
         data = load_config(strict=False)
-        has_channel = authority_channel()
         before = {k: effective(data).get(k, DEFAULT_CONFIG[k]) for k in DEFAULT_CONFIG}
         data.pop("pending", None)
         data.update(before)
@@ -888,7 +948,7 @@ def configuration(args):
                 raise DmdError("max-no-progress must be 1..6; do not bypass host loop safeguards")
             data["max_no_progress"] = args.max_no_progress
         after = {k: data[k] for k in DEFAULT_CONFIG}
-        if has_channel and after != before and not terminal_confirms(f"change hook settings {before} -> {after}"):
+        if after != before and not authority.terminal_confirms(f"change hook settings {before} -> {after}"):
             data["pending"] = {"prior": before, "at": now()}
             notice = ("the change takes effect once the operator approves it (the host asks them); "
                       "until then the hooks keep " + json.dumps(before))
@@ -911,6 +971,7 @@ HELP = {
     "uncertain": "Record or reconcile an external operation with unknown outcome",
     "coverage": "Show the contract; list, map or mark request items; assert coverage",
     "review": "Record the final request/diff/integration review",
+    "review-policy": "Request an operator-confirmed independent/self review policy",
     "status": "Print the report (--json for task and gate)",
     "next": "Gate JSON with the next executable actions",
     "gate": "Compute and store the gate; exit 0 only on COMPLETE",
@@ -933,7 +994,7 @@ HELP = {
     "migrate": "Import a schema-1 record into a new schema-2 task",
 }
 
-HOOK_EVENTS = ("session-start", "stop", "task-completed", "pre-tool-use", "post-tool-use", "post-tool-failure")
+HOOK_EVENTS = ("user-prompt-submit", "session-start", "stop", "task-completed", "pre-tool-use", "post-tool-use", "post-tool-failure")
 
 def parser():
     p = argparse.ArgumentParser(prog="dmd", description="Persistent obligations, strict remediation, verified completion")
@@ -943,7 +1004,7 @@ def parser():
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
     def command(name, fn):
         s = sub.add_parser(name, help=HELP[name], description=HELP[name]); s.set_defaults(func=fn); return s
-    s = command("init", init); s.add_argument("-m", "--message"); s.add_argument("--request-file"); s.add_argument("--authority", required=True); s.add_argument("--session"); s.add_argument("--new", action="store_true"); s.add_argument("--independent-review", action="store_true")
+    s = command("init", init); s.add_argument("-m", "--message"); s.add_argument("--request-file"); s.add_argument("--authority", required=True); s.add_argument("--session"); s.add_argument("--new", action="store_true"); s.add_argument("--independent-review", action="store_true", help="already the default"); s.add_argument("--from-host", action="store_true")
     s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--covers", action="append", metavar="C-XX"); s.add_argument("--authority"); s.add_argument("--json", action="store_true")
     s = command("work", work); s.add_argument("action", choices=["add", "set", "remove", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace"); s.add_argument("--clear-deps", action="store_true"); s.add_argument("--json", action="store_true")
     s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"])
@@ -955,15 +1016,16 @@ def parser():
     s = command("run", run); s.add_argument("ids", nargs="*"); s.add_argument("--all", action="store_true"); s.add_argument("--red", action="store_true"); s.add_argument("--quiet-window", type=float); s.add_argument("--wait-exclusive", type=float)
     s = command("finding", finding); s.add_argument("action", choices=["add", "set", "defer", "list"]); s.add_argument("--authority"); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--location"); s.add_argument("--status", choices=sorted(FINDING_STATES)); s.add_argument("--origin", choices=["introduced", "pre-existing", "dependency", "unknown"]); s.add_argument("--note"); s.add_argument("--work", action="append"); s.add_argument("--check", action="append"); s.add_argument("--duplicate"); s.add_argument("--evidence"); s.add_argument("--input", action="append"); s.add_argument("--json", action="store_true")
     s = command("blocker", blocker); s.add_argument("action", choices=["add", "clear", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--json", action="store_true")
-    for flag in ["id", "item", "owner", "unblock", "proof"]: s.add_argument("--" + flag)
+    for flag in ["id", "item", "owner", "unblock", "proof", "evidence"]: s.add_argument("--" + flag)
     s = command("uncertain", uncertain); s.add_argument("action", choices=["add", "resolve", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--proof"); s.add_argument("--json", action="store_true")
-    s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert", "items", "map", "context"]); s.add_argument("item", nargs="*"); s.add_argument("--req"); s.add_argument("--note")
+    s = command("coverage", coverage); s.add_argument("action", choices=["show", "assert", "items", "map", "context"]); s.add_argument("item", nargs="*"); s.add_argument("--req"); s.add_argument("--note"); s.add_argument("--authority")
     s = command("review", review); s.add_argument("--kind", choices=["self", "independent"], required=True); s.add_argument("--reviewer", required=True); s.add_argument("--note", required=True); s.add_argument("--evidence", required=True)
     for name in ["status", "next", "gate", "report", "handoff", "reconcile"]:
         s = command(name, inspect_task); s.add_argument("--json", action="store_true"); s.add_argument("--save", action="store_true"); s.add_argument("--only", action="append", choices=SECTIONS, help="render one report section")
         s.add_argument("--brief", action="store_true", help="omit the per-candidate source map from gate JSON")
     s = command("state", other); s.add_argument("status", choices=["ACTIVE", "PAUSED", "CANCELLED"]); s.add_argument("--reason", required=True); s.add_argument("--authority")
-    s = command("amend", other); s.add_argument("text")
+    s = command("amend", other); s.add_argument("text"); s.add_argument("--authority")
+    s = command("review-policy", other); s.add_argument("policy", choices=["independent", "self"]); s.add_argument("--authority", required=True)
     s = command("attempt", other); s.add_argument("item"); s.add_argument("signature"); s.add_argument("--strategy")
     s = command("bind-session", other); s.add_argument("session")
     s = command("map-host-task", other); s.add_argument("--host-id", required=True); s.add_argument("--work", required=True)

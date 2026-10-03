@@ -1,8 +1,9 @@
 """The human-readable report: named sections rendered from a task and its gate."""
 from __future__ import annotations
 from pathlib import Path
-from .model import acceptance_reason, attested, candidate_outputs, check_candidate, legacy_receipt, live, repeated_attempts
-from .source import output_match, untracked
+from .model import acceptance_reason, attested, check_candidate, legacy_receipt, live, repeated_attempts
+from .runner import approval_reason
+from .source import untracked
 
 
 SECTIONS = ("assignment", "acceptance", "requirements", "work", "checks", "findings", "blockers", "decisions", "attempts", "reviews", "leftovers", "owed", "next", "footer")
@@ -11,10 +12,13 @@ def sections(directory, t, g):
     """The report as named sections, so a reader can ask for one instead of the dump."""
     counts = g.get("attestation") or {}
     out = {}
-    out["assignment"] = ["## Assignment", t["original_request"]]
+    provenance = t.get("request_provenance") or {"kind": "legacy-agent-transcribed"}
+    out["assignment"] = ["## Assignment", t["original_request"], "Request provenance: " + provenance["kind"]]
     out["acceptance"] = ["## Acceptance basis",
                          f"- Accepted checks executed by dmd: {counts.get('executed', 0)}",
-                         f"- Accepted checks SELF-ATTESTED by the agent (no command was run): {counts.get('self_attested', 0)}"]
+                         f"- Accepted checks SELF-ATTESTED by the agent (no command was run): {counts.get('self_attested', 0)}",
+                         "- Command capture is not semantic proof. Inspect actual assertions and the full request-to-outcome mapping.",
+                         "- Supplied review/blocker files and stdin are agent-transcribed notes, not authenticated external observations."]
     lines = ["## Requirements"]
     for r in t["requirements"]:
         line = f"- {r['id']} [{r['status']}] {r['text']} (source: {r['anchor']})"
@@ -31,12 +35,12 @@ def sections(directory, t, g):
     out["work"] = lines
     lines = ["## Checks"]
     for c in t["checks"]:
-        reason = acceptance_reason(directory, c, g.get("source"), t["root"])
+        reason = acceptance_reason(directory, c, g.get("source"), t["root"], task=t)
         current = reason is None
         if c.get("removed"):
             basis = "superseded"
         else:
-            basis = "SELF-ATTESTED" if attested(c) else "EXECUTED"
+            basis = "SELF-ATTESTED" if attested(c) else ("COMMAND CAPTURE" if c.get("receipt") else "NOT EXECUTED")
         lines.append(f"- {c['id']} [{'ACCEPTED' if current else 'UNVERIFIED'} · {basis}] ({c['method']}) {c['expect']}")
         if attested(c) and c.get("attested_because"):
             lines.append("  Attested because: " + c["attested_because"])
@@ -44,14 +48,17 @@ def sections(directory, t, g):
             lines.append("  Superseded: " + c["removed_reason"])
         if c.get("exclusive"):
             lines.append("  Exclusive: " + ", ".join(c["exclusive"]))
+        if c["method"] == "command" and not c.get("removed"):
+            why = approval_reason(t, c)
+            lines.append("  Verifier: " + (why or "operator-confirmed definition and declared inputs"))
         if c.get("writes"):
-            lines.append("  Outputs left out of the fingerprint (untracked only): " + ", ".join(c["writes"]))
+            lines.append("  Allowed generated outputs (contents remain fingerprinted): " + ", ".join(c["writes"]))
         if c.get("receipt"):
             r = c["receipt"]
             lines.append("  Evidence: " + str(directory / r["artifact"]["path"]))
             if r.get("candidate"):
                 lines.append(f"  Tested: {r['candidate']} @ {r.get('head') or 'no-head'}")
-            elif legacy_receipt(c):
+            elif legacy_receipt(c) and current:
                 lines.append(f"  Tested: task root (receipt predates 0.5.0 candidate binding); rerun to bind it to {check_candidate(c, t['root'])}")
             if r.get("stale"):
                 d = r["stale"].get("drift") or {}
@@ -81,7 +88,7 @@ def sections(directory, t, g):
         for e in t["authority"]:
             state = ("withdrawn" if e.get("withdrawn") else f"confirmed via {e['confirmed']['via']}" if e.get("confirmed")
                      else "AWAITING THE OPERATOR'S CONFIRMATION" if e.get("channel")
-                     else "NOT CONFIRMED: no confirmation channel was installed")
+                     else "AWAITING CONFIRMATION: use a controlling terminal or install enforcing hooks")
             out["decisions"].append(f"- {e['id']} [{state}] {e['op']} {e['target']}: {e['text']}")
     repeats = {item: history for item, history in (t.get("attempts") or {}).items() if repeated_attempts(history)}
     out["attempts"] = []
@@ -112,8 +119,9 @@ def leftovers(t, limit=20):
     check declared as its output, and checks whose command left processes running. Commit
     what is a deliverable; remove the rest."""
     root = t["root"]
-    outputs = candidate_outputs(t).get(root, [])
-    loose = sorted(p for p in (untracked(root) or set()) if not output_match(p, outputs)) if Path(root).is_dir() else []
+    outputs = {p for c in live(t["checks"]) if check_candidate(c, root) == root
+               for p in (c.get("receipt") or {}).get("outputs", {})}
+    loose = sorted(p for p in (untracked(root) or set()) if p not in outputs) if Path(root).is_dir() else []
     holders = [c["id"] for c in live(t["checks"]) if (c.get("receipt") or {}).get("background_holders")]
     if not loose and not holders:
         return []

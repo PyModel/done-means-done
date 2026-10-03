@@ -108,7 +108,7 @@ def cap_histories(t):
     for row in t["checks"] + t["work"]:
         if len(row.get("history") or []) > MAX_HISTORY:
             del row["history"][:-MAX_HISTORY]
-    for key in ("review_log", "recovery", "authority"):
+    for key in ("review_log", "recovery"):
         if len(t.get(key) or []) > MAX_HISTORY:
             del t[key][:-MAX_HISTORY]
     for history in (t.get("attempts") or {}).values():
@@ -201,14 +201,14 @@ def rebind_sessions(old, new):
 
 # Hook configuration ------------------------------------------------------------------
 
-DEFAULT_CONFIG = {"mode": "observe", "max_no_progress": 6}
+DEFAULT_CONFIG = {"mode": "enforce", "max_no_progress": 6}
 HOOK_MODES = ("off", "observe", "enforce")
 
 def config_errors(config):
     errors = []
     if not isinstance(config, dict):
         return ["config.json must be an object"]
-    if config.get("mode", "observe") not in HOOK_MODES:
+    if config.get("mode", DEFAULT_CONFIG["mode"]) not in HOOK_MODES:
         errors.append(f"invalid hook mode {config.get('mode')!r}; choose off, observe or enforce")
     cap = config.get("max_no_progress", 6)
     if not isinstance(cap, int) or isinstance(cap, bool) or not 1 <= cap <= 6:
@@ -252,17 +252,52 @@ def save_config(data):
 
 # Task creation -----------------------------------------------------------------------
 
-def create_task(cwd, task_id, request, authorization, session=None, new=False, require_review=False, prepare=None):
+def prompt_path(session, root):
+    return state_root() / "prompts" / (digest([valid_session(session), str(root)]) + ".json")
+
+
+def capture_prompt(session, cwd, prompt):
+    root, _, _ = identity(cwd)
+    text = redact(require_text(prompt, "host prompt"))
+    if len(text.encode()) > 1048576:
+        raise DmdError("host prompt exceeds 1 MiB")
+    atomic(prompt_path(session, root), json.dumps({"root": str(root), "session": digest(session),
+           "text": text, "digest": digest(text), "at": now()}))
+
+
+def captured_prompt(session, root):
+    if not session:
+        return None
+    path = prompt_path(session, root)
+    if not path.exists():
+        return None
+    data = read_json(path)
+    if data.get("root") != str(root) or data.get("session") != digest(session) or digest(data.get("text")) != data.get("digest"):
+        raise DmdError("host prompt provenance is inconsistent")
+    return data
+
+
+def create_task(cwd, task_id, request, authorization, session=None, new=False, require_review=True, prepare=None, from_host=False):
     """Create and activate a task record for the worktree at cwd. An unfinished task there
     is superseded (paused) only when `new` is set; its sessions follow the new task."""
     if session is not None:
         valid_session(session)
     base, root = base_dir(cwd, create=True)
+    captured = captured_prompt(session, root)
+    if from_host and captured is None:
+        raise DmdError("no captured host request for this session and worktree")
+    if captured:
+        if not from_host and redact(request.strip()) != captured["text"]:
+            raise DmdError("request differs from the captured host prompt; use init --from-host with the same --session")
+        request = captured["text"]
+    provenance = ({"kind": "host-captured", "session": captured["session"], "digest": captured["digest"], "at": captured["at"]}
+                  if captured else {"kind": "agent-transcribed", "digest": digest(redact(request.strip()))})
     task_id = ident(task_id or "T-" + uuid.uuid4().hex)
     directory = base / task_id
     t = {"schema": SCHEMA, "version": __version__, "task_id": task_id, "root": str(root),
          "state": "ACTIVE", "created_at": now(), "original_request": redact(request.strip()),
-         "authorization": redact(authorization), "amendments": [], "requirements": [], "work": [],
+         "authorization": redact(authorization), "request_provenance": provenance,
+         "amendments": [], "requirements": [], "work": [],
          "checks": [], "findings": [], "blockers": [], "uncertain": [], "events": [], "sessions": [],
          "approvals": {}, "coverage": None, "review": None, "running": None, "attempts": {},
          "require_independent_review": require_review, "host_map": {}}

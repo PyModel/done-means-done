@@ -26,10 +26,26 @@ class ModelFixture(unittest.TestCase):
         self.c = self.t["checks"][0]
         # A receipt binds to the fingerprint of the tree the check tested, not the whole map.
         self.src = m.source_for(self.fp, self.c)
-        self.c["receipt"] = {"kind": "command", "source": self.src, "definition": digest(m.check_definition(self.c)), "artifact": self.art, "exit": 0, "matched": True, "failure": None}
+        self.approve()
+        self.c["receipt"] = {"kind": "command", "assurance_version": 2, "approval": self.t["approvals"]["A-01"]["signature"],
+                             "source": self.src, "definition": digest(m.check_definition(self.c)), "artifact": self.art, "exit": 0, "matched": True, "failure": None, "candidate": str(self.repo)}
         self.seal()
+    def confirm(self, op, target, binding):
+        log = self.t.setdefault("authority", [])
+        log.append({"id": f"AU-{len(log) + 1:02d}", "op": op, "target": target, "text": "fixture",
+                    "at": "fixture", "channel": True, "confirmed": {"via": "fixture", "at": "fixture"}, "binding": binding})
+        return log[-1]["id"]
+    def reapprove(self):
+        self.approve(); r = self.c.setdefault("receipt", {}); r["definition"] = digest(m.check_definition(self.c))
+        r["approval"] = self.t["approvals"]["A-01"]["signature"]
+    def approve(self):
+        from dmdlib.runner import approval_signature
+        signature = approval_signature(self.c)
+        self.t.setdefault("approvals", {})["A-01"] = {"signature": signature, "note": "fixture",
+                                                      "decision": self.confirm("check.approve", "A-01", signature)}
     def seal(self):
-        self.t["coverage"] = {"digest": m.contract_digest(self.t), "note": "fixture source mapping"}
+        self.t["coverage"] = {"digest": m.contract_digest(self.t), "note": "fixture source mapping",
+                               "decision": self.confirm("coverage.assert", "coverage", m.contract_digest(self.t))}
         self.t["review"] = {"signature": m.review_signature(self.t, self.fp), "artifact": self.art, "kind": "self"}
     def gate(self):
         return m.gate(self.directory, self.t)
@@ -46,12 +62,12 @@ class ModelCase(ModelFixture):
     def test_clean_fixture_completes(self): self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_sole_attested_check_cannot_accept_a_requirement(self):
         self.c["method"] = "manual"; self.c["attested_because"] = "inherently observed by a person"
-        self.c["receipt"] = {"kind": "manual", "source": self.src, "definition": m.digest(m.check_definition(self.c)),
+        self.c["receipt"] = {"kind": "manual", "assurance_version": 2, "source": self.src, "definition": m.digest(m.check_definition(self.c)),
                              "artifact": self.art, "note": "observed"}
         self.seal(); self.blocked("self-attested")
     def test_operator_authority_allows_an_attested_only_requirement(self):
         self.c["method"] = "manual"; self.c["attested_because"] = "inherently observed by a person"
-        self.c["receipt"] = {"kind": "manual", "source": self.src, "definition": m.digest(m.check_definition(self.c)),
+        self.c["receipt"] = {"kind": "manual", "assurance_version": 2, "source": self.src, "definition": m.digest(m.check_definition(self.c)),
                              "artifact": self.art, "note": "observed"}
         self.t["requirements"][0]["attest_only"] = True
         self.t["requirements"][0]["attest_only_authority"] = "operator accepted manual acceptance"
@@ -71,7 +87,9 @@ class ModelCase(ModelFixture):
     def test_superseded_record_without_a_rationale_is_invalid(self):
         self.t["work"][0]["removed"] = True; self.blocked("superseded work has no recorded rationale")
     def test_attestation_counts_are_reported(self):
-        self.assertEqual(self.gate()["attestation"], {"executed": 1, "self_attested": 0})
+        counts = self.gate()["attestation"]
+        self.assertEqual((counts["executed"], counts["self_attested"]), (1, 0))
+        self.assertIn("not semantic proof", counts["meaning"])
     def test_no_requirement_is_not_completion(self):
         self.t["requirements"] = []; self.t["work"] = []; self.t["checks"] = []; self.seal(); self.blocked("no active")
     def test_omitted_new_requirement_invalidates_coverage(self):
@@ -88,11 +106,11 @@ class ModelCase(ModelFixture):
         self.assertEqual(m.validation_errors(self.t), [])
     def test_planned_work_without_a_mapped_check_blocks(self):
         # Planned work cannot silently vanish: it needs its own evidence or an explicit supersede.
-        self.c["work"] = []; self.c["receipt"]["definition"] = digest(m.check_definition(self.c)); self.seal()
+        self.c["work"] = []; self.reapprove(); self.seal()
         self.blocked("W-01: no mapped acceptance check")
     def test_requirement_level_check_without_work_items_completes(self):
         # Work items are the agent's optional decomposition; the requirement's evidence is what counts.
-        self.t["work"] = []; self.c["work"] = []; self.c["receipt"]["definition"] = digest(m.check_definition(self.c)); self.seal()
+        self.t["work"] = []; self.c["work"] = []; self.reapprove(); self.seal()
         self.assertEqual(self.gate()["status"], "COMPLETE", self.gate())
     def test_check_work_cannot_cross_requirement(self):
         self.t["requirements"].append({"id": "R-02", "text": "other", "anchor": "ask two", "status": "active"}); self.c["req"] = "R-02"; self.blocked("another requirement")
@@ -130,8 +148,13 @@ class ModelCase(ModelFixture):
         (self.repo / "source.txt").write_text("edited\n"); fp = m.task_fingerprint(self.t)
         self.c["receipt"]["source"] = m.source_for(fp, self.c); self.blocked("review")
     def test_final_review_invalidated_by_changed_outcome(self): self.c["receipt"]["note"] = "different observation"; self.blocked("review")
-    def test_independent_review_not_self_review(self): self.t["require_independent_review"] = True; self.blocked("independent")
-    def test_independent_review_record_accepted_when_required(self): self.t["require_independent_review"] = True; self.t["review"]["kind"] = "independent"; self.assertEqual(self.gate()["status"], "COMPLETE")
+    def test_independent_review_not_self_review(self):
+        self.t["require_independent_review"] = True; self.seal(); self.blocked("independent")
+    def test_independent_review_record_accepted_when_required(self):
+        self.t["require_independent_review"] = True; self.seal()
+        self.t["review"]["kind"] = "independent"
+        self.t["review"]["decision"] = self.confirm("review.independent", "review", digest([self.t["review"]["signature"], self.t["review"]["artifact"]]))
+        self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_preexisting_confirmed_finding_blocks(self): self.finding(); self.seal(); self.blocked("F-01")
     def test_suspected_finding_blocks(self): self.finding(status="suspected"); self.seal(); self.blocked("F-01")
     def test_fixed_unverified_finding_blocks(self): self.finding(status="fixed-unverified"); self.seal(); self.blocked("F-01")
@@ -151,8 +174,10 @@ class ModelCase(ModelFixture):
         self.c["receipt"]["definition"] = digest(m.check_definition(self.c)); self.seal(); self.blocked("baseline")
     def test_documented_baseline_limitation_with_artifact(self):
         self.c.update(regression=True, red_match="intentional assertion", red_exit=1)
+        self.reapprove()
         definition = digest(m.check_definition(self.c)); self.c["receipt"]["definition"] = definition
-        self.c["baseline"] = {"reason": "isolated original hardware unavailable; substitute invariant evidence reviewed", "definition": definition, "artifact": self.art}
+        self.c["baseline"] = {"reason": "isolated original hardware unavailable; substitute invariant evidence reviewed", "definition": definition, "artifact": self.art,
+                               "decision": self.confirm("check.baseline", "A-01", definition)}
         self.finding(status="fixed-verified", work=["W-01"], checks=["A-01"], note="remediation verified")
         self.seal(); self.assertEqual(self.gate()["status"], "COMPLETE")
     def test_red_nonintentional_exit_is_invalid(self):

@@ -17,7 +17,7 @@ class AttestationCase(DmdFixture):
 
     def attested_task(self, because="No command can observe a rendered browser layout"):
         self.cmd("init", "-m", "Ship feature X, fix all bugs, add tests", "--authority", "operator invoked")
-        self.cmd("req", "add", "Feature X works end to end", "--anchor", "original request")
+        self.cmd("req", "add", "Feature X works end to end", "--anchor", "feature X")
         self.cmd("work", "add", "Build feature X", "--req", "R-01")
         args = ["check", "add", "--req", "R-01", "--work", "W-01", "--method", "manual",
                 "--expect", "Feature X works end to end"]
@@ -36,7 +36,7 @@ class AttestationCase(DmdFixture):
 
     def test_command_check_rejects_an_attestation_reason(self):
         self.cmd("init", "-m", "x", "--authority", "op")
-        self.cmd("req", "add", "r", "--anchor", "original request")
+        self.cmd("req", "add", "r", "--anchor", "x")
         self.cmd("work", "add", "w", "--req", "R-01")
         self.cmd("check", "add", "--req", "R-01", "--work", "W-01", "--cmd", "python3 -B verify.py",
                  "--expect", "e", "--match", "ACCEPTANCE_PASS:1",
@@ -60,6 +60,7 @@ class AttestationCase(DmdFixture):
         self.cmd("work", "set", "--id", "W-01", "--status", "verified")
         self.cmd("req", "attest-only", "--id", "R-01",
                  "--authority", "Operator accepts manual acceptance for this outcome")
+        self.cmd("review-policy", "self", "--authority", "operator accepts self review here")
         self.cmd("coverage", "assert", "--note", "mapped")
         self.cmd("review", "--kind", "self", "--reviewer", "me", "--note", "final",
                  "--evidence", str(self.review))
@@ -79,7 +80,7 @@ class AttestationCase(DmdFixture):
         out, _ = self.cmd("report")
         line = next(x for x in out.splitlines() if x.startswith("- A-01"))
         self.assertIn("SELF-ATTESTED", line)
-        self.assertNotIn("EXECUTED", line)
+        self.assertNotIn("COMMAND CAPTURE", line)
         self.assertIn("No command can observe", out)
 
     def test_report_marks_an_executed_command_check(self):
@@ -87,8 +88,9 @@ class AttestationCase(DmdFixture):
         self.cmd("run", "A-01")
         out, _ = self.cmd("report")
         line = next(x for x in out.splitlines() if x.startswith("- A-01"))
-        self.assertIn("EXECUTED", line)
+        self.assertIn("COMMAND CAPTURE", line)
         self.assertNotIn("SELF-ATTESTED", line)
+        self.assertIn("not semantic proof", out)
 
     def test_attested_only_authority_is_rendered_in_the_report(self):
         self.cmd(*self.attested_task())
