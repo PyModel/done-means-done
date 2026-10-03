@@ -25,14 +25,14 @@ Do not nest the new package inside an existing skill directory. Use an explicit 
 
 ```bash
 python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --link-bin              # preview: ~/.local/bin/dmd -> bin/dmd, plus hook registrations
-python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --link-bin --apply      # explicit settings change and PATH link
+python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --link-bin --apply      # explicit settings change, PATH link, config mode enforce
+python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --link-bin --apply --mode observe   # explicit observe opt-out
 dmd --version
-dmd config --mode enforce
 ```
 
 `--link-bin [DIR]` symlinks `bin/dmd` into `DIR` (default `~/.local/bin`) so `dmd` resolves in every shell and every agent tool call without a per-command shell function. It refuses to replace a file or a foreign symlink at that path. `--link-bin --no-hooks` manages only the link and leaves `settings.json` alone; `--remove` removes the link it recorded along with the hook registrations. If `DIR` is not on `PATH`, the installer says so; `export PATH="$HOME/.local/bin:$PATH"` in the shell profile, or `export PATH="$HOME/.claude/skills/done-means-done/bin:$PATH"` to skip the link.
 
-The last command enables blocking; `observe` is the default. Inspect the resulting `.claude/settings.json`, then start a new host session. Invoke `/done-means-done` with the actual assignment. A current session needs `init --session ACTUAL_ID` or `bind-session ACTUAL_ID`; do not assume a shell variable supplies it.
+Since 0.8.0 an applied install writes `mode: enforce` to the state config (explicit `--mode observe`, or a later operator-confirmed `dmd config --mode observe`, is the opt-out) and registers seven events, including `UserPromptSubmit` (which captures the operator's submitted prompt per session/worktree for `init --from-host`) and PreToolUse matchers that cover Bash, Edit and Write. Inspect the resulting `.claude/settings.json`, then start a new host session. Invoke `/done-means-done` with the actual assignment. A current session needs `init --session ACTUAL_ID` or `bind-session ACTUAL_ID`; do not assume a shell variable supplies it.
 
 For alternate paths, use installer `--settings /physical/path/settings.json` and `--state-dir /physical/private/state`. Continue using the same `DMD_STATE` for CLI calls. Hook command paths are machine-local, not portable shared settings.
 
@@ -42,7 +42,7 @@ Finish or checkpoint active checks and obtain a clean handoff before changing ru
 
 Move the old installation to an operator-chosen backup outside all skill discovery directories, then copy the new complete directory into the original target path. Do not destroy old task records. Validate the new package and inspect hook previews before application. Avoid activating duplicate skill copies from user/project/shared discovery locations.
 
-For an install in place (a Git checkout the settings already point at), updating the files is not enough when a release adds a hook event: rerun `hooks/install.py --apply` so the new registration (0.7.0 adds PreToolUse, which puts operator decisions to the operator) is added and recorded in the manifest. Until then no confirmation channel exists and decisions are reported as unconfirmed.
+For an install in place (a Git checkout the settings already point at), updating the files is not enough when a release adds a hook event: rerun `hooks/install.py --apply` so the new registrations are added and recorded in the manifest (0.8.0 adds `UserPromptSubmit` and extends the PreToolUse/PostToolUse matchers to Edit and Write). Until then no confirmation channel or prompt capture exists and decisions await confirmation. 0.8.0 also changes what a green receipt means: existing receipts predate confirmed-approval binding and full output fingerprinting, so after upgrading, reapprove each check (`dmd approve A-01 --note ...` and have the operator confirm it) and rerun it; the gate reports them as stale until then. Rollback to 0.7.x keeps those receipts readable again.
 
 ## Schema-1 import
 

@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.8.0 — operator-confirmed trust boundaries
+
+An adversarial audit of the completion gate (hollow self-approved verifiers, dropped request
+clauses, advisory-by-default enforcement, fabricated blockers, laundered duplicates and
+`--writes` freshness holes) drove a hardening release. The threat model is unchanged — local
+cooperative enforcement, not a sandbox against the same user — but every agent-authored
+record that used to complete a contract now needs the operator's confirmed decision.
+
+- **Verifier approval is operator-owned.** `dmd approve` / `--approve` records the agent's
+  inspection and a pending `check.approve` decision; the check executes only once the
+  operator confirms it (host prompt or controlling terminal). Unchanged reapprovals reuse
+  the confirmation; a changed verifier, input or environment never inherits it. The run and
+  the gate both enforce this, with or without hooks. `test_anticheat.py` (23 cases) covers
+  the bypasses this closes.
+- **Contract fidelity.** `init --from-host` binds the task to the prompt the host captured
+  (`UserPromptSubmit`, session+worktree scoped); a typed request that differs from the
+  capture is refused, and provenance (`host-captured` / `agent-transcribed`) is recorded and
+  reported. `--anchor` must be an exact quote. `coverage assert`/`context`, `amend`,
+  confirmed-duplicate dispositions, baseline limitations, regression downgrades,
+  `review-policy` and whole-task blockers are operator decisions.
+- **Enforcement defaults to enforce.** An applied install writes `mode: enforce`
+  (`--mode observe` is the explicit opt-out). PreToolUse/PostToolUse matchers cover
+  Bash, Edit and Write; common protected-path writes (redirection, `sed -i`, `mv`,
+  `chmod`, `tee`, heredocs) are put to the operator. Shell matching remains a prompt, not
+  a sandbox. Confirmation tickets bind the exact tool-call payload, and failed or
+  mismatched post-tool events confirm nothing.
+- **Blockers and findings.** Every blocker records an evidence artifact; one without it
+  supports nothing. A `task` blocker needs operator confirmation. A confirmed-duplicate
+  needs an accepted executed check shared with its canonical finding plus the operator's
+  confirmed disposition.
+- **Freshness.** `--writes` no longer excludes anything from fingerprints: generated
+  outputs are content-bound in the receipt and hashed on every later gate, so edits, new
+  files under the glob and pre-existing untracked source all stale the evidence. Only
+  files the run itself created are excused, once, for that run's drift comparison.
+- **Terminal.** `/dev/tty` confirmation uses bounded `os.open`/`select` I/O (the
+  TextIOWrapper path raised `io.UnsupportedOperation` on macOS PTYs). It is a cooperative
+  signal — a PTY-capable process can simulate the keystroke — never identity proof.
+- **Operations.** Failed check runs record attempt signatures automatically. Reports
+  distinguish `COMMAND CAPTURE` from `SELF-ATTESTED`, state that capture is not semantic
+  proof, and label request provenance and agent-transcribed evidence. The Stop hook keeps
+  governing a session that left its worktree (binding release discloses the open task);
+  the watchdog release still never means COMPLETE.
+- **Migration.** Receipts written before 0.8.0 (no confirmed-approval binding, partial
+  output fingerprinting) are reported stale: reapprove each check and rerun it. Approvals
+  recorded before 0.8.0 do not authorize execution. Default independent review applies to
+  tasks created by this release; `review-policy self --authority ...` is the operator's
+  opt-out.
+
 ## Unreleased
 
 Resilience and one module boundary. Found by a full read of the runtime after 0.7.1; nothing here changes the contract the gate enforces.

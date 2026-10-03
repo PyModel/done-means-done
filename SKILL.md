@@ -4,7 +4,7 @@ description: Finish every part of a substantial assignment (code, research, writ
 license: MIT
 compatibility: Python 3.10+ on macOS or Linux. Git is optional. Claude Code lifecycle hooks are optional and explicitly installed.
 metadata:
-  version: "0.7.1"
+  version: "0.8.0"
 ---
 
 # Done Means Done
@@ -31,7 +31,7 @@ Evidence goes stale when the tree it tested changes. Yesterday's green proves no
 - **Status.** A work item's `--status` is your progress note. Evidence is what the gate reads.
 - **Supersede your own records.** A work item or check you added in error is retired with `work remove` / `check remove --note`. It stays visible in the report.
 
-Only the operator changes the contract. Authority flags (`req cancel`, `req attest-only`, `finding defer`, `review --kind independent`, `state`, `init --new`, `config`) record the operator's own words; use them only when the operator said so, quoting them. With the hooks enforcing, the host asks the operator to approve each one, and an unapproved decision leaves the gate owing `AU-*` until they confirm it or you withdraw it ([commands](references/commands.md#operator-decisions)).
+Only the operator changes the contract. Authority flags (`req cancel`, `req attest-only`, `finding defer`, `coverage context`/`assert`, `amend`, `review --kind independent`, `state`, `init --new`, `config`) record a decision (`AU-*`) that counts only once the operator confirms it: through the host permission prompt (enforcing hooks) or `y` on their own terminal. A quote you type is never enough on its own; an unconfirmed decision leaves the gate owing `AU-*` until the operator confirms it or you withdraw it ([commands](references/commands.md#operator-decisions)). The same rule governs verifier approval: `--approve "<what you inspected>"` records your inspection, and the check executes only after the operator confirms that exact definition and its declared inputs. Approving an unchanged definition again reuses the confirmation; a changed verifier never inherits it.
 
 ## Runtime
 
@@ -50,13 +50,15 @@ dmd init --request-file - --authority "Operator invoked done-means-done" --sessi
 <the operator's request, verbatim>
 REQUEST
 dmd coverage items        # the request's list items, C-01...
-dmd req add "Export endpoint returns CSV for every report type" --anchor "request: 'add CSV export for all reports'" --covers C-01
+dmd req add "Export endpoint returns CSV for every report type" --anchor "add CSV export for all reports" --covers C-01
 dmd coverage assert --note "3 outcomes and 1 constraint in the request map to R-01..R-04"
 ```
 
+With the hooks installed, the host has already captured the submitted prompt for this session and worktree; bind the task to it instead of retyping (`dmd init --from-host --authority ... --session "${CLAUDE_SESSION_ID}"`). `--anchor` must be an exact quote from the request (or a confirmed amendment); a paraphrase or invented quote is refused. The request's provenance (`host-captured` or `agent-transcribed`) is recorded and shown in every report.
+
 Include what the outcome makes necessary: callers, migrations, config, docs, deployment verification, rollback. Optional suggestions are not requirements.
 
-**Done when:** rereading the original request finds no outcome without a requirement, every listed item is covered or marked context (`coverage map` / `coverage context`), and coverage is asserted.
+**Done when:** rereading the original request finds no outcome without a requirement, every listed item is covered or marked context (`coverage map` / `coverage context`), and the operator has confirmed the asserted coverage.
 
 ### 2. Prove
 
@@ -68,7 +70,7 @@ dmd check add --req R-01 --cmd "python3 -B tests/verify_export.py" \
   --match "EXPORT_OK" --input tests/verify_export.py --approve "read the verifier: 4 assertions, token last"
 ```
 
-The token has to come from real assertions; `dmd` refuses a token that appears in the command text itself (`tests && echo OK`). A check that writes a report into the tree declares it (`--writes reports/junit.xml`) so its own output does not make it stale. Non-code deliverables still get executed checks: a script that confirms every requested section of a report exists, every cited source resolves, a dataset's row counts and invariants hold, a deployed endpoint answers. Use attestation (`--method manual|review|browser --attested-because ...`) only when nothing can observe the behavior from a command. See [verification](references/verification.md).
+The token has to come from real assertions; `dmd` refuses a token that appears in the command text itself (`tests && echo OK`). A check that writes a report into the tree declares it (`--writes reports/junit.xml`): the generated file's contents stay fingerprinted, so a later edit or an unrelated file matching the glob still stales the evidence — only files the run itself created are excused, once. Non-code deliverables still get executed checks: a script that confirms every requested section of a report exists, every cited source resolves, a dataset's row counts and invariants hold, a deployed endpoint answers. Use attestation (`--method manual|review|browser --attested-because ...`) only when nothing can observe the behavior from a command. See [verification](references/verification.md).
 
 **Done when:** every requirement has a check that would fail if its outcome were missing.
 
@@ -76,7 +78,7 @@ The token has to come from real assertions; `dmd` refuses a token that appears i
 
 Repeat until `dmd next` names nothing but the final review. Implement a coherent slice, then `dmd run A-01 A-02` (or `dmd run --all`), then `dmd next`. Every gate reason names its cause and every `next` action the full command that clears it. Read the `summary.headline` first.
 
-After two materially equivalent failures, record `dmd attempt <ID> "<failure>" --strategy "<different approach>"` and change the hypothesis: isolate a reproducer, read the primary contract, instrument the failing path. A leaf finishing, a phase ending, a green build, or context compaction is not the assignment finishing.
+After two materially equivalent failures — failed runs are recorded automatically — change the hypothesis: isolate a reproducer, read the primary contract, instrument the failing path. A leaf finishing, a phase ending, a green build, or context compaction is not the assignment finishing.
 
 **Done when:** `dmd next` lists only `review`.
 
@@ -110,13 +112,13 @@ dmd gate
 dmd report --save
 ```
 
-A second pass by the same agent is `self`; if the operator required independent review (`init --independent-review`), only a genuinely separate reviewer satisfies it. Report every requirement and finding, how many checks were executed versus attested, and real limitations. Link the saved report rather than flooding the operator with logs.
+Independent review is the default; a `self` review needs the operator's confirmed policy (`dmd review-policy self --authority "..."`), and an `independent` review's reviewer provenance must itself be confirmed. Only a genuinely separate reviewer satisfies `independent`. Report every requirement and finding, how many checks were executed versus attested, and real limitations. Link the saved report rather than flooding the operator with logs.
 
 **Done when:** `dmd gate` returns `COMPLETE`, the report is saved, nothing you started is still running, and *Possible leftovers* lists only deliverables.
 
 ## When you cannot proceed
 
-- **Missing prerequisite** (credentials, a permission, an outage): `dmd blocker add "<observed>" --item R-XX|W-XX --owner "<who>" --unblock "<exact action>" --proof "<evidence>"`. Keep working on everything else. The Stop hook releases you only when every remaining obligation waits on a blocker (`BLOCKED`).
+- **Missing prerequisite** (credentials, a permission, an outage): `dmd blocker add "<observed>" --item R-XX|W-XX --owner "<who>" --unblock "<exact action>" --proof "<evidence>" --evidence -` with the actual observation (a captured response, a quoted error). A whole-task blocker additionally needs the operator's confirmation before it suspends anything. Keep working on everything else. The Stop hook releases you only when every remaining obligation waits on a supported blocker (`BLOCKED`).
 - **A question only the operator can answer:** record it as a blocker owned by the operator on the affected item, and keep working on the rest.
 - **Unknown external effect** (a deploy or payment with no final response): `dmd uncertain add`, then verify what actually happened before any retry.
 - **Stuck in a loop:** after six stops with no newly satisfied obligation, the hook lets one stop through so a person can look. The task stays active, and the next session is told why the last one stopped.
