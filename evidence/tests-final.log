@@ -50,6 +50,8 @@ test_partial_words_and_tiny_quotes_are_refused (test_anticheat.OperatorWords.tes
 test_pause_needs_quote_but_resume_does_not (test_anticheat.OperatorWords.test_pause_needs_quote_but_resume_does_not) ... ok
 test_prompt_history_is_bounded (test_anticheat.OperatorWords.test_prompt_history_is_bounded) ... ok
 test_the_original_request_is_not_authority (test_anticheat.OperatorWords.test_the_original_request_is_not_authority) ... ok
+test_withdrawing_into_a_looser_contract_needs_a_quote (test_anticheat.OperatorWords.test_withdrawing_into_a_looser_contract_needs_a_quote) ... ok
+test_withdrawing_into_a_stricter_contract_needs_nothing (test_anticheat.OperatorWords.test_withdrawing_into_a_stricter_contract_needs_nothing) ... ok
 test_generated_output_is_allowed_but_subsequent_edits_are_stale (test_anticheat.OutputFreshness.test_generated_output_is_allowed_but_subsequent_edits_are_stale) ... ok
 test_preexisting_untracked_source_under_writes_is_not_hidden (test_anticheat.OutputFreshness.test_preexisting_untracked_source_under_writes_is_not_hidden) ... ok
 test_all_refuses_before_running_when_one_is_unapproved (test_candidates.BatchCase.test_all_refuses_before_running_when_one_is_unapproved) ... ok
@@ -381,7 +383,7 @@ test_watchdog_releases_the_stop_but_never_the_obligations (test_runtime.RuntimeC
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 379 tests in 117.549s
+Ran 381 tests in 118.133s
 
 OK
-DMD_TESTS_PASS:379;skipped=0
+DMD_TESTS_PASS:381;skipped=0
