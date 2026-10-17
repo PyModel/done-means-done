@@ -227,6 +227,16 @@ class OperatorWords(SecurityFixture):
         self.say("drop the logging amendment")
         self.cmd("authority", "withdraw", amend, "--authority", "drop the logging amendment")
 
+    def test_an_agent_amendment_never_spends_the_operators_quote(self):
+        self.cmd("amend", "skip the CSV export")
+        self.say("skip the CSV export")
+        self.cancel("skip the CSV export")
+
+    def test_config_without_a_mode_key_still_checks_lowering(self):
+        save_config({"max_no_progress": 6})
+        self.cmd("config", "--max-no-progress", "2", code=2)
+        self.cmd("config", "--mode", "enforce")
+
     def test_withdrawing_into_a_stricter_contract_needs_nothing(self):
         self.say("skip the CSV export")
         self.cancel("skip the CSV export")

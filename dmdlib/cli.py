@@ -755,11 +755,17 @@ def other(args):
                 print(json.dumps(found, indent=2))
 
 
+# Decisions whose text is an operator quote (cli.quoted); only these spend a quote.
+QUOTED_OPS = {"req.cancel", "req.attest-only", "finding.defer", "coverage.context", "review-policy", "state", "init.new",
+              "check.no-regression"}
+
+
 def quoted(t, text, what):
     """The operator's words authorizing one loosening decision on task t (store.operator_quote).
     A quote is spent once used: one phrase never authorizes a string of decisions."""
     quote = operator_quote(text, Path(t["root"]), t.get("created_at") or "", what)
-    spent = next((e["id"] for e in t.get("authority") or [] if quote in (e.get("text"), e.get("withdrawn_authority"))), None)
+    spent = next((e["id"] for e in t.get("authority") or []
+                  if (e["op"] in QUOTED_OPS and e.get("text") == quote) or e.get("withdrawn_authority") == quote), None)
     if spent:
         raise DmdError(f"{what}: that quote already authorized {spent}; quote the operator's words for this decision")
     return quote
@@ -963,7 +969,8 @@ def configuration(args):
                 raise DmdError("max-no-progress must be 1..6; do not bypass host loop safeguards")
             data["max_no_progress"] = args.max_no_progress
         rank = {"off": 0, "observe": 1, "enforce": 2}
-        if rank.get(data["mode"], 0) < rank.get(before["mode"], 0) or data.get("max_no_progress", 6) < before["max_no_progress"]:
+        after = {k: data.get(k, DEFAULT_CONFIG[k]) for k in DEFAULT_CONFIG}
+        if rank.get(after["mode"], 0) < rank.get(before["mode"], 0) or after["max_no_progress"] < before["max_no_progress"]:
             cwd = args.cwd or os.getcwd()
             try:
                 directory = locate(cwd)
