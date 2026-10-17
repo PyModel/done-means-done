@@ -756,8 +756,22 @@ def other(args):
 
 
 def quoted(t, text, what):
-    """The operator's words authorizing a loosening decision on task t (store.operator_quote)."""
-    return operator_quote(text, Path(t["root"]), t.get("created_at") or "", what)
+    """The operator's words authorizing one loosening decision on task t (store.operator_quote).
+    A quote is spent once used: one phrase never authorizes a string of decisions."""
+    quote = operator_quote(text, Path(t["root"]), t.get("created_at") or "", what)
+    spent = next((e["id"] for e in t.get("authority") or [] if quote in (e.get("text"), e.get("withdrawn_authority"))), None)
+    if spent:
+        raise DmdError(f"{what}: that quote already authorized {spent}; quote the operator's words for this decision")
+    return quote
+
+
+def loosens_when_withdrawn(entry):
+    """Withdrawing these restores a looser contract: a suspended state, self review, the
+    scope an amendment added, or (for init.new) cancels the newer assignment."""
+    prior = entry.get("prior") or {}
+    return (entry["op"] in ("amend", "init.new")
+            or (entry["op"] == "state" and prior.get("state") in SUSPENDED)
+            or (entry["op"] == "review-policy" and prior.get("require_independent_review") is False))
 
 
 def operator_decision(t, op, target, text, prior, binding=None):
@@ -778,6 +792,8 @@ def authority_command(args):
     with edit(args, "authority." + args.action) as (directory, t):
         entry = find(t, require_text(args.id, "decision ID (AU-XX)"))
         if args.action == "withdraw":
+            if loosens_when_withdrawn(entry):
+                entry["withdrawn_authority"] = quoted(t, args.authority, f"--authority withdrawing {entry['id']} ({entry['op']})")
             if entry["op"] == "init.new":
                 withdraw_supersede(directory, t, entry)
             else:
@@ -1031,7 +1047,7 @@ def parser():
     s = command("bind-session", other); s.add_argument("session")
     s = command("map-host-task", other); s.add_argument("--host-id", required=True); s.add_argument("--work", required=True)
     s = command("recover-run", other); s.add_argument("--proof", required=True)
-    s = command("authority", authority_command); s.add_argument("action", choices=["list", "confirm", "withdraw"]); s.add_argument("id", nargs="?")
+    s = command("authority", authority_command); s.add_argument("action", choices=["list", "confirm", "withdraw"]); s.add_argument("id", nargs="?"); s.add_argument("--authority")
     s = command("config", configuration); s.add_argument("--mode", choices=["off", "observe", "enforce"]); s.add_argument("--max-no-progress", type=int); s.add_argument("--authority")
     s = command("hook", None); s.add_argument("event", choices=HOOK_EVENTS)
     s = command("list", None); s.add_argument("--json", action="store_true"); s.add_argument("--state", action="append")

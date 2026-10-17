@@ -213,6 +213,26 @@ class OperatorWords(SecurityFixture):
         self.cmd("init", "-m", "smaller task", "--authority", "fine by me", "--new", code=2)
         self.assertEqual(self.task()["original_request"], "Deliver value 42 and export the CSV")
 
+    def test_withdrawing_into_a_looser_contract_needs_a_quote(self):
+        self.say("pause this task")
+        self.cmd("state", "PAUSED", "--reason", "asked", "--authority", "pause this task")
+        self.cmd("state", "ACTIVE", "--reason", "resume")
+        resume = self.decisions("state")[-1]["id"]
+        self.cmd("authority", "withdraw", resume, code=2)
+        self.assertEqual(self.task()["state"], "ACTIVE")
+        self.cmd("review-policy", "self", "--authority", "pause this task", code=2)  # a quote is spent once used
+        self.cmd("amend", "Also add logging")
+        amend = self.decisions("amend")[0]["id"]
+        self.cmd("authority", "withdraw", amend, code=2)
+        self.say("drop the logging amendment")
+        self.cmd("authority", "withdraw", amend, "--authority", "drop the logging amendment")
+
+    def test_withdrawing_into_a_stricter_contract_needs_nothing(self):
+        self.say("skip the CSV export")
+        self.cancel("skip the CSV export")
+        self.cmd("authority", "withdraw", self.decisions("req.cancel")[0]["id"])
+        self.assertEqual(self.task()["requirements"][1]["status"], "active")
+
     def test_prompt_history_is_bounded(self):
         for i in range(55):
             self.say(f"prompt number {i}")

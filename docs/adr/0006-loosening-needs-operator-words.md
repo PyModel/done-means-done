@@ -12,7 +12,9 @@ ADR 0005 removed every operator prompt. That left the agent free to cancel a req
 2. A loosening decision is refused, with nothing recorded, unless its `--authority` is an exact, word-bounded quote of at least 4 non-space characters from a prompt captured in the task's worktree after the task was created (`store.operator_quote`). For `config`, the worktree is the cwd, and "after" means after the task there, if any.
 3. The original request and amendments are not sources. The request names every requirement, so quoting it would authorize dropping any of them; amendments are agent-typed, so allowing them would let `amend` launder a quote.
 4. Loosening ops: `req cancel`, `req attest-only`, `finding defer`, `coverage context`, `review-policy self`, `state PAUSED|CANCELLED`, `init --new` / `migrate --new` over an unfinished task, `check edit --no-regression`, a lower `config --mode` or `--max-no-progress`. Tightening needs no quote. Ops already gated by executed evidence keep that gate: `blocker --item task`, a confirmed duplicate, `review --kind independent`, `check baseline`.
-5. `check.approve` is unchanged: whether a verifier is hollow can't be judged mechanically beyond the existing refusal of a match token printed by the command itself.
+5. A quote is spent once used. A phrase that authorized one decision (or one withdrawal) never authorizes another, so "pause this task" can't also switch to self review.
+6. Withdrawing a decision is gated the same way when the reversal loosens the contract: withdrawing a resume (back to PAUSED/CANCELLED), a switch to independent review (back to self), an amendment (drops its scope) or an `init --new` (cancels the newer assignment). Other withdrawals restore a stricter contract and need nothing.
+7. `check.approve` is unchanged: whether a verifier is hollow can't be judged mechanically beyond the existing refusal of a match token printed by the command itself.
 
 ## Consequences
 

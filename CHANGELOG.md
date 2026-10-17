@@ -7,7 +7,9 @@
   `check edit --no-regression` (new `--authority`) and a lower `config` mode or watchdog
   limit (new `--authority`) are refused unless `--authority` quotes, exactly, a prompt the
   operator typed in this worktree after the task began. The UserPromptSubmit hook keeps the
-  last 50 per worktree. The request and amendments never count. Nothing prompts. ADR 0006.
+  last 50 per worktree. The request and amendments never count, a quote authorizes one
+  decision only, and `authority withdraw` needs a quote when the reversal loosens the
+  contract (new `--authority`). Nothing prompts. ADR 0006.
 - Test-file lint cleaned (unused imports, a dead variable); `pyflakes` is clean repo-wide.
 
 - **Nothing asks the operator.** Contract decisions (`AU-*`), verifier approvals included,

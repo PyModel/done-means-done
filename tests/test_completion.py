@@ -456,7 +456,10 @@ class AutomaticDecisions(test_runtime.DmdFixture):
         self.setup_task(); old = locate(self.repo)
         self.say("operator approves"); self.cmd("init", "-m", "tiny replacement", "--authority", "operator approves", "--new")
         self.assertNotIn("init.new", json.dumps(self.gate()["reasons"]))
-        self.cmd("authority", "withdraw", self.entries("init.new")[0]["id"])
+        entry = self.entries("init.new")[0]["id"]
+        self.cmd("authority", "withdraw", entry, code=2)  # cancelling the newer assignment loosens it
+        self.say("go back to the old task")
+        self.cmd("authority", "withdraw", entry, "--authority", "go back to the old task")
         self.assertEqual(locate(self.repo), old)
         self.assertEqual(load_task(old)["state"], "ACTIVE")
 
