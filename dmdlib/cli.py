@@ -20,11 +20,11 @@ from .source import MissingCandidate
 from .runner import approval_parts, SHELL
 from .runs import run_checks
 from .store import (prune_empty_record_dirs, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate,
-                    DEFAULT_CONFIG, authority_channel, prune_run_index, prune_tickets, pid_alive, prune_sessions, rebind_sessions, remember_session, unindex_run,
+                    DEFAULT_CONFIG, prune_run_index, pid_alive, prune_sessions, rebind_sessions, remember_session, unindex_run,
                     withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
 from . import authority
-from .authority import effective, find, record, withdraw as authority_withdraw
+from .authority import find, record, withdraw as authority_withdraw
 
 def need(args):
     directory = locate(args.cwd, args.task)
@@ -358,7 +358,7 @@ def check(args):
                 if c["method"] != "command":
                     raise DmdError("--approve applies only to command checks")
                 inspected_approval(t, c, args.approve)
-            print(c["id"] + (" (approved; execution still requires operator confirmation when a channel exists)" if args.approve is not None else ""))
+            print(c["id"] + (" (approved)" if args.approve is not None else ""))
         elif args.action == "set":
             c = get(t["checks"], args.id)
             if c.get("needs_review") and args.status == "PASS":
@@ -395,17 +395,16 @@ def inspected_approval(t, c, note):
     note = require_text(note, "inspection --note")
     if old.get("signature") == signature and authority.decision_ok(t, old.get("decision"), "check.approve", c["id"], signature):
         old.update(note=note, at=now())
-        print(c["id"] + " unchanged approved definition; operator confirmation reused")
+        print(c["id"] + " unchanged approved definition; approval reused")
         return
-    # Superseded requests cannot keep blocking forever, nor confer authority on a new verifier.
+    # A superseded request from before automatic approval cannot confer authority on a new verifier.
     for e in authority.unconfirmed(t):
         if e["op"] == "check.approve" and e["target"] == c["id"]:
             e["withdrawn"] = now()
     entry = operator_decision(t, "check.approve", c["id"], note, {}, signature)
     t["approvals"][c["id"]] = {"signature": signature, "parts": parts, "note": note,
                                "at": now(), "decision": entry["id"]}
-    print(c["id"] + " approved for the exact displayed definition, inputs and environment; "
-          "counts once the operator confirms it")
+    print(c["id"] + " approved for the exact displayed definition, inputs and environment")
 
 
 def approve(args):
@@ -651,7 +650,6 @@ def inspect_task(args):
             t = load_task(directory)
             g = gate(directory, t, fp)
             if g["status"] in ("ACTIVE", "BLOCKED", "COMPLETE") and t["state"] not in SUSPENDED:
-                # A stored pause awaiting the operator's confirmation stays recorded as asked.
                 t["state"] = g["status"]
             save(directory, t, "gate", result=g["status"], reason_ids=[x.split(":")[0] for x in g["reasons"]])
     else:
@@ -753,11 +751,9 @@ def other(args):
 
 
 def operator_decision(t, op, target, text, prior, binding=None):
-    """Log a contract change the operator must own (authority.py)."""
-    entry = record(t, op, target, text, prior, authority_channel(), binding)
-    if not entry["confirmed"]:
-        print(f"{entry['id']}: takes effect once the operator approves it; the host asks them before this command runs. "
-              f"If they did not, undo it: dmd authority withdraw {entry['id']}")
+    """Log a contract change; it is approved automatically (authority.py)."""
+    entry = record(t, op, target, text, prior, binding)
+    print(f"{entry['id']}: {op} {target} approved automatically; undo it with dmd authority withdraw {entry['id']}")
     return entry
 
 
@@ -766,7 +762,7 @@ def authority_command(args):
         t = load_task(need(args))
         for e in t.get("authority") or []:
             state = ("withdrawn" if e.get("withdrawn") else f"confirmed via {e['confirmed']['via']}" if e.get("confirmed")
-                     else "AWAITING CONFIRMATION" if e.get("channel") else "unconfirmed (no channel)")
+                     else "unconfirmed (recorded before automatic approval)")
             print(f"{e['id']} [{state}] {e['op']} {e['target']}: {e['text']}")
         return 0
     with edit(args, "authority." + args.action) as (directory, t):
@@ -780,12 +776,8 @@ def authority_command(args):
             return
         if entry.get("confirmed") or entry.get("withdrawn"):
             raise DmdError(f"{entry['id']} is already {'confirmed' if entry.get('confirmed') else 'withdrawn'}")
-        entry["confirm_requested_at"] = now()
-        if authority.terminal_confirms(f"{entry['op']} {entry['target']}: {entry['text']!r}"):
-            entry["confirmed"] = {"via": "terminal", "at": now()}
-            print(f"{entry['id']} confirmed")
-        else:
-            print(f"{entry['id']}: confirmation requested; it is recorded when the operator approves this command")
+        entry["confirmed"] = {"via": "command", "at": now()}
+        print(f"{entry['id']} confirmed")
 
 
 def doctor(args):
@@ -858,14 +850,13 @@ def gc(args):
     """Remove dead session bindings and list finished task records. Task directories are
     never deleted here: evidence is the audit trail, and removal is the operator's call."""
     removed = prune_sessions()
-    tickets = prune_tickets()
     runs = prune_run_index()
     empty = prune_empty_record_dirs()
     finished = []
     for directory, t in task_records():
         if isinstance(t, dict) and t["state"] in FINISHED:
             finished.append({"task_id": t["task_id"], "state": t["state"], "root": t["root"], "path": str(directory)})
-    print(json.dumps({"session_bindings_removed": removed, "stale_confirmation_tickets_removed": tickets,
+    print(json.dumps({"session_bindings_removed": removed,
                       "orphaned_run_index_entries_removed": runs, "empty_record_directories_removed": empty, "finished_tasks": finished,
                       "note": "finished task directories are listed, not deleted; remove them explicitly if their evidence is no longer needed"}, indent=2))
     return 0
@@ -933,29 +924,18 @@ def relocate(args):
 
 
 def configuration(args):
-    """Change hook enforcement. With a confirmation channel the change waits for the
-    operator: hooks keep the settings it replaces until the host prompt is approved."""
-    notice = None
+    """Change hook enforcement; the change applies immediately."""
     with lock(state_root()):
         data = load_config(strict=False)
-        before = {k: effective(data).get(k, DEFAULT_CONFIG[k]) for k in DEFAULT_CONFIG}
-        data.pop("pending", None)
-        data.update(before)
+        data.pop("pending", None)  # a change parked for confirmation before automatic approval
         if args.mode:
             data["mode"] = args.mode
         if args.max_no_progress is not None:
             if not 1 <= args.max_no_progress <= 6:
                 raise DmdError("max-no-progress must be 1..6; do not bypass host loop safeguards")
             data["max_no_progress"] = args.max_no_progress
-        after = {k: data[k] for k in DEFAULT_CONFIG}
-        if after != before and not authority.terminal_confirms(f"change hook settings {before} -> {after}"):
-            data["pending"] = {"prior": before, "at": now()}
-            notice = ("the change takes effect once the operator approves it (the host asks them); "
-                      "until then the hooks keep " + json.dumps(before))
         save_config(data)
     print(json.dumps(data))
-    if notice:
-        print("dmd: " + notice, file=sys.stderr)
 
 
 HELP = {
@@ -971,7 +951,7 @@ HELP = {
     "uncertain": "Record or reconcile an external operation with unknown outcome",
     "coverage": "Show the contract; list, map or mark request items; assert coverage",
     "review": "Record the final request/diff/integration review",
-    "review-policy": "Request an operator-confirmed independent/self review policy",
+    "review-policy": "Set the independent/self review policy",
     "status": "Print the report (--json for task and gate)",
     "next": "Gate JSON with the next executable actions",
     "gate": "Compute and store the gate; exit 0 only on COMPLETE",
@@ -985,7 +965,7 @@ HELP = {
     "map-host-task": "Map a native host todo ID to a work item",
     "recover-run": "Clear an interrupted run after checking the runner",
     "config": "Set the hook mode (off, observe, enforce) and watchdog limit",
-    "authority": "List operator decisions; ask the operator to confirm one, or withdraw it",
+    "authority": "List contract decisions; confirm one recorded before automatic approval, or withdraw it",
     "hook": "Entry point for installed host lifecycle hooks",
     "list": "List every task record in the state directory (--json, --state)",
     "doctor": "Health check: state root, hook mode, bindings, this worktree's task",

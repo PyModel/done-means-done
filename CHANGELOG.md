@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — automatic approval
+
+- **Nothing asks the operator.** Contract decisions (`AU-*`), verifier approvals included,
+  are approved when recorded and stay in the log, the report and `dmd authority withdraw`.
+  The PreToolUse hook is no longer installed; `install.py --apply` removes the 0.8.0
+  registration and `dmd hook pre-tool-use` is a no-op. `dmd config` applies immediately.
+  Decisions left unconfirmed by 0.8.0 still block the gate: `dmd authority confirm AU-XX`.
+  Trade-off: the agent can approve its own verifiers and change its contract. See ADR 0005.
+
 ## 0.8.0 — operator-confirmed trust boundaries
 
 An adversarial audit of the completion gate (hollow self-approved verifiers, dropped request

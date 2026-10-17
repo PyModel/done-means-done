@@ -226,23 +226,6 @@ def load_config(strict=True):
             raise DmdError("; ".join(errors))
     return data
 
-def installed_events():
-    """Hook events registered by an installer run against this state root."""
-    events = set()
-    directory = state_root() / "installations"
-    for manifest in sorted(directory.glob("*.json")) if directory.is_dir() else []:
-        with contextlib.suppress(DmdError, OSError, AttributeError):
-            events |= {c.rsplit(" ", 1)[-1] for c in read_json(manifest).get("commands") or [] if isinstance(c, str)}
-    return events
-
-def authority_channel():
-    """Whether the host can ask the operator to confirm a contract change (authority.py)."""
-    try:
-        config = load_config(strict=False)
-    except DmdError:
-        return False
-    return not config_errors(config) and authority.channel(config, installed_events())
-
 def save_config(data):
     errors = config_errors(data)
     if errors:
@@ -324,8 +307,7 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
                     if prior.get("running"):
                         raise DmdError("cannot supersede an assignment while its check is running")
                     authority.record(t, "init.new", prior["task_id"], authorization,
-                                     {"dir": str(old), "state": prior["state"], "state_reason": prior.get("state_reason")},
-                                     authority_channel())
+                                     {"dir": str(old), "state": prior["state"], "state_reason": prior.get("state_reason")})
                     prior["state"] = "PAUSED"
                     save(old, prior, "superseded-active-pointer", new_task_id=task_id)
         private_dir(directory)
@@ -339,7 +321,7 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
 
 
 def withdraw_supersede(directory, t, entry):
-    """Undo an unconfirmed `init --new`: the superseded task resumes as it was, the worktree
+    """Undo an `init --new`: the superseded task resumes as it was, the worktree
     and its sessions point back at it, and the replacement is cancelled."""
     prior = entry["prior"]
     old = Path(prior["dir"])
@@ -405,19 +387,6 @@ def prune_run_index():
         if not live:
             with contextlib.suppress(OSError):
                 entry.unlink(); removed += 1
-    return removed
-
-# A confirmation ticket outlives its tool call only when the operator denied the prompt
-# (no PostToolUse consumes it). A day is far longer than any prompt waits for an answer.
-TICKET_TTL_SECONDS = 86400
-
-def prune_tickets(max_age=TICKET_TTL_SECONDS):
-    removed = 0
-    directory = state_root() / "pending"
-    for ticket in sorted(directory.glob("*.json")) if directory.is_dir() else []:
-        with contextlib.suppress(OSError):
-            if time.time() - ticket.stat().st_mtime > max_age:
-                ticket.unlink(); removed += 1
     return removed
 
 # What a worktree directory holds besides its task records: the active pointer and the lock.

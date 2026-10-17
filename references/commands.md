@@ -22,16 +22,16 @@ Every `--evidence` and `--request-file` accepts `-` to read standard input (a he
 | `req attest-only --id R-01 --authority TEXT` | Record operator authority to accept this outcome on attestation alone; named in the report |
 | `work remove --id W-02 --note TEXT` | Supersede an agent-authored work item; refused while a dependency or finding still maps to it |
 | `check remove --id A-02 --note TEXT` | Supersede an agent-authored check; refused if its requirement would be left with none |
-| `amend TEXT [--authority TEXT]` | Preserve an operator amendment (an `AU-*` decision the operator confirms); its list items join the inventory; reconcile changed requirements afterward |
+| `amend TEXT [--authority TEXT]` | Preserve an operator amendment (an `AU-*` decision, approved automatically); its list items join the inventory; reconcile changed requirements afterward |
 | `review-policy (independent\|self) --authority TEXT` | Change the final-review policy; `independent` is the default, and switching to `self` is an operator decision |
 | `coverage show` | Display the source request and obligation inventory without executing checks |
 | `coverage items` | The request's explicit list items (`C-01`...) and what covers each: a requirement, a context note, or `UNMAPPED` |
 | `coverage map C-03 [C-04 ...] --req R-02` | Record that an existing requirement covers these items |
 | `coverage context C-05 [C-06 ...] --note TEXT [--authority TEXT]` | Mark items as context, not outcomes; an operator decision (`AU-*`) |
-| `coverage assert --note TEXT` | Assert source-to-inventory review against the current contract digest; refused while a list item is unmapped, and an operator decision (`AU-*`) — the operator is asked to confirm the mapping |
+| `coverage assert --note TEXT` | Assert source-to-inventory review against the current contract digest; refused while a list item is unmapped, and an operator decision (`AU-*`)  |
 | `req list`, `work list`, `check list`, `finding list`, `blocker list` (`--json`) | One record group, read-only, one line per record; `status --only work` renders one report section |
 
-`--authority` records the instruction; on its own it does not authenticate a human (see *Operator decisions*). Never fabricate authority or use a new task to bypass the old assignment. Any missing mandatory requirement remains a review failure even when the structural gate is otherwise green.
+`--authority` records the instruction; it does not authenticate a human (see *Operator decisions*). Never fabricate authority or use a new task to bypass the old assignment. Any missing mandatory requirement remains a review failure even when the structural gate is otherwise green.
 
 Tasks created since 0.7.0 record every explicit list item of the request (`- x`, `* x`, `1. x`, `2) x`, `a) x`; fenced code is skipped) and of each `amend`. Each must be covered by a requirement or marked context before coverage can be asserted, so an enumerated outcome cannot be dropped silently. Prose is not segmented. Tasks created earlier are unaffected.
 
@@ -39,20 +39,20 @@ Tasks created since 0.7.0 record every explicit list item of the request (`- x`,
 
 These commands change the contract the agent is held to: `req cancel`, `req attest-only`, `finding defer`, `state`, `review --kind independent`, `init --new` / `migrate --new` over an unfinished task, `config --mode|--max-no-progress`, and `relocate`. Each logs a decision (`AU-01`...) on the task.
 
-Every decision — with or without a channel — stays pending until the operator confirms it: through the host permission prompt (hooks installed by this release's `install.py --apply` in its default `enforce` mode, which registers PreToolUse), or by answering `y` on their own controlling terminal (`dmd authority confirm AU-01` re-asks). The prompt names what the command would do and still appears when permission prompts are otherwise bypassed. Until confirmed:
+Every decision is approved automatically when recorded (`confirmed via auto`); no hook asks the operator and no terminal prompt waits. The log is the audit trail:
 
-- the gate owes `AU-01: req.cancel R-02 awaits the operator's confirmation`, which no blocker hides;
-- a typed `--authority` quote, an inspected approval note, a coverage/context exception, an amendment, a regression downgrade, a baseline limitation, a confirmed-duplicate disposition and a whole-task blocker are all agent-authored records until the operator confirms them;
-- an unconfirmed `state PAUSED|CANCELLED` does not suspend enforcement, and an unconfirmed `config` change leaves the hooks on their previous settings;
+- every decision is listed by `dmd authority list` and in the report's *Operator decisions* section;
+- `dmd authority withdraw AU-01` restores what the decision changed (newest first);
+- a decision recorded unconfirmed before automatic approval still blocks the gate until `dmd authority confirm AU-01` approves it or it is withdrawn;
 - a superseded task stays the one that must finish.
 
 ```bash
-dmd authority list                 # every decision and whether it was confirmed
-dmd authority confirm AU-01        # the host asks the operator again, naming the decision
-dmd authority withdraw AU-01       # undo an unconfirmed decision; what it changed is restored
+dmd authority list                 # every decision and how it was confirmed
+dmd authority confirm AU-01        # approve a decision recorded before automatic approval
+dmd authority withdraw AU-01       # undo a decision; what it changed is restored
 ```
 
-Running a hook entry by hand, removing the hooks, or writing to the state root / runtime / host settings (through Bash redirection, `sed -i`, `mv`, `chmod`, or the Edit/Write tools) is also put to the operator in enforce mode: the matcher covers common shell forms and the Edit/Write file arguments, not every possible one — it is a prompt, not a sandbox. Without a channel the decision still awaits confirmation and `summary.authority_unverified` lists it as recorded with no channel. In a headless `claude -p` run nobody can approve a prompt; a terminal confirmation cannot happen either, so such a decision can only be withdrawn.
+Nothing in the hooks intercepts commands: the agent can pause the task, lower enforcement or edit state files without a prompt. This is a cooperative ledger, not a guard against the agent; read the decision log.
 
 ## Work and acceptance
 
@@ -98,7 +98,7 @@ Only `--method command` produces machine-verified acceptance. `--method manual|r
 
 `--match` is a literal string, not a regex. A command whose text contains its own match (`npm test && echo OK`, `python3 -c 'print("OK")'`) is refused: that reduces to an exit status. Like the bare-printer lint, this catches the lazy case, not a determined forger. It is necessary but not sufficient semantic proof. The called verifier must assert the correct behavior and intended test discovery before printing it. An arbitrary zero exit is insufficient.
 
-`--approve NOTE` on `check add` or `check edit` records the same inspected approval as `dmd approve` for the definition as written. The approval binds the exact definition, its declared `--input` files (content-hashed) and the execution environment (shell, PATH, platform, interpreter major.minor). Inspection is the agent's attestation; execution additionally requires the operator's confirmed decision (`check.approve`). Reapproving an unchanged definition reuses the existing confirmation; a changed verifier, input or environment starts a new pending decision and never inherits the old one. Any later edit clears the receipt, so edited command text never runs uninspected. Receipts written before 0.8.0 (no confirmed-approval binding) are reported stale and must be reapproved and rerun.
+`--approve NOTE` on `check add` or `check edit` records the same inspected approval as `dmd approve` for the definition as written. The approval binds the exact definition, its declared `--input` files (content-hashed) and the execution environment (shell, PATH, platform, interpreter major.minor). Inspection is the agent's attestation and is approved automatically (`check.approve`). Reapproving an unchanged definition reuses the decision; a changed verifier, input or environment needs a new approval. Any later edit clears the receipt, so edited command text never runs uninspected. Receipts written before 0.8.0 (no confirmed-approval binding) are reported stale and must be reapproved and rerun.
 
 `check edit --id A-01 ...` changes explicitly supplied fields, archives the old definition/evidence, and clears current green, baseline, and pending-import status. Reapprove after any definition/input/runtime approval change; an expired approval names whether the definition, a declared input, or the execution environment drifted. `--no-regression` clears a mis-flagged regression declaration and is recorded in the check history. An edit must leave the entire check valid. `--input` is repeatable and names real files relative to the check working directory or absolute paths; declared missing inputs are errors.
 
@@ -159,7 +159,7 @@ dmd finding defer --id F-04 --authority "Operator: vendor bug, tracked upstream 
   --note "Fix belongs to the dependency; workaround is not authorized"
 ```
 
-A duplicate of a **confirmed** finding additionally requires an accepted executed check shared with its canonical finding (`--check` on both, current at duplicate time) and the operator's confirmed disposition; a shared filename or a note alone is refused. Origins: `introduced`, `pre-existing`, `dependency`, `unknown`. They do not exempt remediation. `defer` is the only operator-authorized exit for a defect that will not be fixed in this assignment: `--status deferred` is refused, the authority is recorded as an amendment (so `coverage assert` is owed again), and the finding is listed as deferred in the report and the gate `summary.findings_deferred`. Fixed findings require current mapped checks (work is optional) and a regression baseline or documented limitation. A disproof is bound to the files it examined: the `--location` file (`path`, `path:line`) plus any `--input FILE`. An edit elsewhere leaves it resolved; an edit to those files reopens it by name. A location that names no file binds it to the whole source tree. A finding that was ever `confirmed` is disproved only with `--check` naming an accepted executed check that demonstrates the invariant holds; a suspected one needs the note and evidence artifact. Duplicate chains must resolve without cycles or missing IDs. Updating a note does not reset an existing status or origin.
+A duplicate of a **confirmed** finding additionally requires an accepted executed check shared with its canonical finding (`--check` on both, current at duplicate time) and a recorded duplicate decision; a shared filename or a note alone is refused. Origins: `introduced`, `pre-existing`, `dependency`, `unknown`. They do not exempt remediation. `defer` is the only operator-authorized exit for a defect that will not be fixed in this assignment: `--status deferred` is refused, the authority is recorded as an amendment (so `coverage assert` is owed again), and the finding is listed as deferred in the report and the gate `summary.findings_deferred`. Fixed findings require current mapped checks (work is optional) and a regression baseline or documented limitation. A disproof is bound to the files it examined: the `--location` file (`path`, `path:line`) plus any `--input FILE`. An edit elsewhere leaves it resolved; an edit to those files reopens it by name. A location that names no file binds it to the whole source tree. A finding that was ever `confirmed` is disproved only with `--check` naming an accepted executed check that demonstrates the invariant holds; a suspected one needs the note and evidence artifact. Duplicate chains must resolve without cycles or missing IDs. Updating a note does not reset an existing status or origin.
 
 ```bash
 dmd blocker add "The integration account rejects the required permission" --item W-02 \
@@ -172,7 +172,7 @@ dmd uncertain resolve --id U-01 --proof "Queried deployment identity and verifie
 dmd uncertain list --json
 ```
 
-Blocker `--item` names `task` or an existing R/W/A/F ID. Every blocker records its evidence artifact; one whose evidence is missing supports nothing (its items stay actionable). A `task` blocker additionally needs the operator's confirmed decision before it suspends work. For dependency scheduling, prefer the exact blocked work item or requirement. Open blockers and unknown effects always prevent COMPLETE. Failed check runs are recorded as attempts automatically (`dmd attempt` remains for manual signatures).
+Blocker `--item` names `task` or an existing R/W/A/F ID. Every blocker records its evidence artifact; one whose evidence is missing supports nothing (its items stay actionable). For dependency scheduling, prefer the exact blocked work item or requirement. Open blockers and unknown effects always prevent COMPLETE. Failed check runs are recorded as attempts automatically (`dmd attempt` remains for manual signatures).
 
 ## Gate output
 
@@ -184,9 +184,9 @@ dmd status --json   # task_dir, task, gate
 dmd --help          # every subcommand with a one-line description; dmd COMMAND --help for flags
 ```
 
-`reasons` is one line per unmet obligation and every line names its cause: `A-01: not run`, `A-02: FAIL: exit or match failed; fix and rerun`, `A-03: stale: /path/worktree changed since the receipt (tested @ <head>); rerun`, `A-04: STALE: passed while its candidate or definition moved; rerun`, `A-05: definition edited; inspect, approve and rerun`, `A-05: verifier approval awaits operator confirmation; inspection notes alone cannot authorize execution`, `A-06: legacy receipt predates confirmed approvals/full output binding; reapprove and rerun`, `W-01: checks owed: A-03`, `review: …`.
+`reasons` is one line per unmet obligation and every line names its cause: `A-01: not run`, `A-02: FAIL: exit or match failed; fix and rerun`, `A-03: stale: /path/worktree changed since the receipt (tested @ <head>); rerun`, `A-04: STALE: passed while its candidate or definition moved; rerun`, `A-05: definition edited; inspect, approve and rerun`, `A-05: verifier approval is unconfirmed (recorded before automatic approval)`, `A-06: legacy receipt predates confirmed approvals/full output binding; reapprove and rerun`, `W-01: checks owed: A-03`, `review: …`.
 
-`summary` groups them: `headline` (one line; it also counts unmapped request items, unasserted coverage, requirements without a check and decisions awaiting the operator), `checks` as `accepted` / `legacy` / `stale` / `failed` / `not_run` / `edited` / `missing_inputs` / `other` ID lists (0.7.0 renamed `unapproved` to `edited`: it holds checks whose definition changed since approval or receipt), `work_unverified`, `findings_open`, `blockers_open`, `review` (`current` or `owed`), `authority_unconfirmed` (decisions awaiting the operator), `authority_unverified` (decisions recorded with no channel), and `rerun`, the `dmd run A-01 A-03 …` that discharges the stale, failed and unrun checks (`null` when none). Legacy receipts (pre-0.5.0 candidate binding, or pre-0.8.0 confirmed-approval binding) are never accepted; the reason names the upgrade and the reapprove-and-rerun path.
+`summary` groups them: `headline` (one line; it also counts unmapped request items, unasserted coverage, requirements without a check and decisions recorded before automatic approval that are still unconfirmed), `checks` as `accepted` / `legacy` / `stale` / `failed` / `not_run` / `edited` / `missing_inputs` / `other` ID lists (0.7.0 renamed `unapproved` to `edited`: it holds checks whose definition changed since approval or receipt), `work_unverified`, `findings_open`, `blockers_open`, `review` (`current` or `owed`), `authority_unconfirmed` (decisions recorded unconfirmed before automatic approval), and `rerun`, the `dmd run A-01 A-03 …` that discharges the stale, failed and unrun checks (`null` when none). Legacy receipts (pre-0.5.0 candidate binding, or pre-0.8.0 confirmed-approval binding) are never accepted; the reason names the upgrade and the reapprove-and-rerun path.
 
 ## Review, reporting and recovery
 
@@ -232,7 +232,7 @@ dmd migrate --from-task /absolute/legacy/task.json --authority "Operator approve
 ```bash
 dmd doctor                      # exit 1 when anything needs attention; names the repair
 dmd list --json --state ACTIVE --state PAUSED
-dmd gc                          # removes dead bindings, stale confirmation tickets, orphaned run-index entries and empty record directories; lists finished tasks, deletes none
+dmd gc                          # removes dead bindings, orphaned run-index entries and empty record directories; lists finished tasks, deletes none
 dmd --task T-id relocate --to /new/checkout/root --authority "Operator moved the checkout"
 dmd check edit --id A-01 --clear-inputs        # drop every declared --input
 dmd check edit --id A-01 --clear-exclusive

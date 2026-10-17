@@ -50,7 +50,7 @@ def sections(directory, t, g):
             lines.append("  Exclusive: " + ", ".join(c["exclusive"]))
         if c["method"] == "command" and not c.get("removed"):
             why = approval_reason(t, c)
-            lines.append("  Verifier: " + (why or "operator-confirmed definition and declared inputs"))
+            lines.append("  Verifier: " + (why or "approved definition and declared inputs (agent-recorded, approved automatically)"))
         if c.get("writes"):
             lines.append("  Allowed generated outputs (contents remain fingerprinted): " + ", ".join(c["writes"]))
         if c.get("receipt"):
@@ -87,8 +87,7 @@ def sections(directory, t, g):
         out["decisions"] = ["## Operator decisions"]
         for e in t["authority"]:
             state = ("withdrawn" if e.get("withdrawn") else f"confirmed via {e['confirmed']['via']}" if e.get("confirmed")
-                     else "AWAITING THE OPERATOR'S CONFIRMATION" if e.get("channel")
-                     else "AWAITING CONFIRMATION: use a controlling terminal or install enforcing hooks")
+                     else "UNCONFIRMED: recorded before automatic approval; dmd authority confirm or withdraw it")
             out["decisions"].append(f"- {e['id']} [{state}] {e['op']} {e['target']}: {e['text']}")
     repeats = {item: history for item, history in (t.get("attempts") or {}).items() if repeated_attempts(history)}
     out["attempts"] = []

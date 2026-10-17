@@ -50,7 +50,7 @@ def preflight(t, checks, window):
         state = {True: "is alive", False: "is not alive; recover it there with dmd recover-run", None: "is on another host"}[r["alive"]]
         problems.append(f"another dmd run ({r['task_id']} check {r['check']}, pid {r['pid']}) holds {', '.join(r['candidates'])}; that runner {state}")
     if problems:
-        raise DmdError("; ".join(problems) + f". Wait for the writer to finish, or rerun with --quiet-window 0 to skip the dirty-file check")
+        raise DmdError("; ".join(problems) + ". Wait for the writer to finish, or rerun with --quiet-window 0 to skip the dirty-file check")
     return candidates
 
 

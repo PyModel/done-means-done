@@ -24,10 +24,6 @@ class DmdFixture(unittest.TestCase):
         self.home = Path(self.tmp.name).resolve(); self.repo = self.home / "project"; self.repo.mkdir()
         self.state = self.home / "state"
         self.env = patch.dict(os.environ, {"DMD_STATE": str(self.state), "PYTHONDONTWRITEBYTECODE": "1"}); self.env.start(); self.addCleanup(self.env.stop)
-        # Functional workflow tests simulate explicit operator responses. Adversarial
-        # subclasses override this; no production approval bypass exists.
-        self.operator_confirmation = patch("dmdlib.authority.terminal_confirms", return_value=True)
-        self.operator_confirmation.start(); self.addCleanup(self.operator_confirmation.stop)
         (self.repo / "subject.py").write_text("VALUE = 42\n")
         (self.repo / "verify.py").write_text('from subject import VALUE\nassert VALUE == 42, "EXPECTED_42"\nprint("ACCEPTANCE_PASS:1")\n')
         self.review = self.home / "review.txt"; self.review.write_text("Reviewed request mapping, actual assertions, final source and integration. Self-review, not independent.\n")

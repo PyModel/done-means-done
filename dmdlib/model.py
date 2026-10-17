@@ -5,7 +5,7 @@ from collections import deque
 from pathlib import Path
 from .storage import DmdError, digest, evidence_ok
 from .source import file_digest, snapshot, MissingCandidate
-from .authority import decision_ok, undisclosed, unconfirmed
+from .authority import decision_ok, unconfirmed
 
 SCHEMA = 2
 TASK_STATES = {"ACTIVE", "PAUSED", "BLOCKED", "CANCELLED", "COMPLETE"}
@@ -461,7 +461,7 @@ class Assessment:
                         if (not cs or not set(cs) <= shared or not all(self.accepted(c) and not attested(get(t["checks"], c)) for c in cs)
                                 or not evidence_ok(self.task_dir, f.get("artifact"))
                                 or not decision_ok(t, f.get("duplicate_decision"), "finding.duplicate", f["id"], digest([f.get("duplicate"), sorted(cs)]))):
-                            reason = "confirmed duplicate needs shared executed evidence and operator-confirmed disposition"; break
+                            reason = "confirmed duplicate needs shared executed evidence and a recorded duplicate decision"; break
                     current = f.get("duplicate"); continue
                 if status == "deferred":
                     if not f.get("note") or not _text(f.get("authority")):
@@ -542,13 +542,12 @@ class Assessment:
 
     def _collect(self):
         t = self.t
-        cov = t.get("coverage") or {}
         loose = unmapped_clauses(t)
         if loose:
             named = "; ".join(f"{c['id']} {c['text'][:60]!r}" for c in loose[:5]) + (f" (+{len(loose) - 5} more)" if len(loose) > 5 else "")
             self._add("coverage", f"coverage: request items with no requirement: {named}")
         elif not self.coverage_ok():
-            self._add("coverage", "coverage: reconcile the full request and obtain operator confirmation of the current inventory")
+            self._add("coverage", "coverage: reconcile the full request, then dmd coverage assert the current inventory")
         if not self.active:
             self._add("task", "no active requirements; an empty ledger cannot complete")
         self.executed_total = self.attested_total = 0
@@ -584,14 +583,14 @@ class Assessment:
             if not b.get("resolved"):
                 self._add(b["id"], f"{b['id']}: unresolved prerequisite for {b['item']}")
                 if not self.blocker_supported(b):
-                    self._add("blocker-evidence", f"{b['id']}: blocker evidence or task-wide operator confirmation missing")
+                    self._add("blocker-evidence", f"{b['id']}: blocker evidence or task-wide blocker decision missing")
         for u in t["uncertain"]:
             if not u.get("resolved"):
                 self._add(u["id"], f"{u['id']}: unknown external outcome")
         if t.get("running"):
             self._add("running", "running: verification still active or its outcome needs recovery")
         for e in unconfirmed(t):
-            self._add(e["id"], f"{e['id']}: {e['op']} {e['target']} awaits the operator's confirmation")
+            self._add(e["id"], f"{e['id']}: {e['op']} {e['target']} awaits confirmation (recorded before automatic approval)")
 
     def coverage_ok(self):
         cov = self.t.get("coverage") or {}
@@ -607,7 +606,7 @@ class Assessment:
         if self.t.get("require_independent_review", True) and r.get("kind") != "independent":
             return "review: independent review required; self-review is not independent"
         if r.get("kind") == "independent" and not decision_ok(self.t, r.get("decision"), "review.independent", "review", digest([r["signature"], r["artifact"]])):
-            return "review: independent reviewer provenance awaits operator confirmation"
+            return "review: independent reviewer provenance decision is unconfirmed (recorded before automatic approval)"
         return None
 
     def actionable(self):
@@ -634,7 +633,7 @@ class Assessment:
         result = []
         for owner in owners:
             if owner == "blocker-evidence":
-                action = "record actual prerequisite evidence; a task-wide blocker also needs operator confirmation (clear and re-add unsupported legacy blockers)"
+                action = "record actual prerequisite evidence (clear and re-add unsupported legacy blockers)"
             elif owner == "coverage":
                 loose = unmapped_clauses(t)
                 if loose:
@@ -650,8 +649,7 @@ class Assessment:
             elif owner == "running":
                 action = "inspect the interrupted run's effects, then dmd recover-run --proof '<what you verified>'"
             elif owner.startswith("AU-"):
-                action = (f"ask the operator whether they want this: dmd authority confirm {owner} (the host asks them to approve "
-                          f"it), or undo it: dmd authority withdraw {owner}")
+                action = f"recorded before automatic approval: dmd authority confirm {owner}, or undo it: dmd authority withdraw {owner}"
             elif owner.startswith("U-"):
                 action = f"verify what actually happened before any retry, then dmd uncertain resolve --id {owner} --proof '<evidence>'"
             elif owner.startswith("R-"):
@@ -764,13 +762,13 @@ class Assessment:
             parts.append(f"{len(open_blockers)} blocker(s) open")
         waiting = [e["id"] for e in unconfirmed(t)]
         if waiting:
-            parts.append(f"{len(waiting)} operator decision(s) await confirmation")
+            parts.append(f"{len(waiting)} decision(s) from before automatic approval await confirmation")
         if review_owed:
             parts.append("final review owed")
         return {"headline": "; ".join(parts) or "all obligations satisfied", "checks": groups, "work_unverified": unverified,
                 "findings_open": open_findings, "findings_deferred": deferred, "blockers_open": open_blockers,
                 "review": "owed" if review_owed else "current",
-                "authority_unconfirmed": waiting, "authority_unverified": [e["id"] for e in undisclosed(t)],
+                "authority_unconfirmed": waiting,
                 "rerun": ("dmd run " + " ".join(rerun)) if rerun else None}
 
     def progress(self):
@@ -835,6 +833,6 @@ def evaluate(task_dir, t, fp=None, require_review=True):
         nxt.append({"id": "plan", "action": "no dependency-ready item; replan around: " + "; ".join(reasons[:3])})
     return {"status": status, "reasons": reasons, "next": nxt, "source": fp,
             "attestation": {"executed": a.executed_total, "self_attested": a.attested_total,
-                            "meaning": "command capture, not semantic proof; operator-confirmed scope and verifier inspection required"},
+                            "meaning": "command capture, not semantic proof; scope and verifier approvals are agent-recorded and approved automatically"},
             "request_provenance": t.get("request_provenance", {"kind": "legacy-agent-transcribed"}),
             "summary": a.summary(bool(review))}, a

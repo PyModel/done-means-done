@@ -14,7 +14,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dmdlib.storage import DmdError, atomic, digest, lock, private_dir, read_json
 
-# Event names this installer registers; also used to recognize its own orphaned registrations.
+# Event names this installer registers or once registered (pre-tool-use, before automatic
+# approval); used to recognize its own orphaned registrations so --apply removes them.
 EVENTS = {"user-prompt-submit", "session-start", "stop", "task-completed", "pre-tool-use", "post-tool-use", "post-tool-failure"}
 
 
@@ -90,8 +91,6 @@ def main(argv=None):
         ("SessionStart", None, command + " session-start", 30),
         ("Stop", None, command + " stop", 30),
         ("TaskCompleted", None, command + " task-completed", 30),
-        # Asks the operator before a command changes their contract (dmdlib/authority.py).
-        ("PreToolUse", "Edit|Write|Bash", command + " pre-tool-use", 10),
         ("PostToolUse", "Edit|Write|Bash", command + " post-tool-use", 10),
         ("PostToolUseFailure", "Edit|Write|Bash", command + " post-tool-failure", 10),
     ]

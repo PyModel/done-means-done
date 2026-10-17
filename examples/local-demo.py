@@ -2,8 +2,8 @@
 """Execute an isolated real repair workflow, then prove same-size edits invalidate acceptance.
 
 This is a local CLI acceptance demonstration, not a live-agent or host-session benchmark.
-The operator is simulated through the documented host permission channel (pre-tool-use ask,
-post-tool-use confirm); no human identity is claimed. Temporary files are removed after.
+Contract decisions are approved automatically and logged; nothing asks the operator.
+Temporary files are removed after.
 """
 from __future__ import annotations
 import json
@@ -43,33 +43,7 @@ def main():
                 raise RuntimeError(f'Expected exit {expected}, got {p.returncode}: {p.stderr}')
             return p.stdout
 
-        def host(event, payload):
-            p = subprocess.run([*dmd, 'hook', event], capture_output=True, text=True, env=env,
-                               timeout=60, input=json.dumps(payload))
-            return [json.loads(line) for line in p.stdout.splitlines() if line.strip()]
-
-        counter = [0]
-
-        def operator_step(*args, stdin=None, expected=0):
-            """A decision the operator must own: the host is asked first, then confirms."""
-            command = 'dmd ' + shlex.join(args)
-            counter[0] += 1
-            payload = {'session_id': session, 'cwd': str(project), 'tool_name': 'Bash',
-                       'tool_use_id': f'demo-{counter[0]}', 'tool_input': {'command': command}}
-            asked = host('pre-tool-use', payload)
-            decision = asked[0].get('hookSpecificOutput', {}).get('permissionDecision') if asked else None
-            if decision != 'ask':
-                raise RuntimeError(f'The host was not asked to approve: {command} -> {asked}')
-            out = raw(*args, stdin=stdin, expected=expected)
-            host('post-tool-use', payload)
-            return out
-
         step = raw
-        # The documented confirmation channel: enforcing hooks with PreToolUse registered.
-        manifests = state / 'installations'; manifests.mkdir(parents=True, mode=0o700, exist_ok=True); os.chmod(state, 0o700)
-        os.chmod(manifests, 0o700)
-        (manifests / 'demo.json').write_text(json.dumps({'commands': ['dmd hook pre-tool-use', 'dmd hook post-tool-use']}))
-
         step('init', '-m', 'Deliver VALUE=42 and remediate the discovered incorrect value',
              '--authority', 'Local acceptance fixture explicitly authorizes its temporary project',
              '--session', session)
@@ -80,15 +54,12 @@ def main():
              '--input', 'verify.py', '--regression', '--red-match', 'EXPECTED_VALUE_42')
         step('finding', 'add', 'VALUE is 41 rather than required 42', '--location', 'subject.py:1',
              '--status', 'confirmed', '--origin', 'pre-existing')
-        operator_step('coverage', 'assert', '--note',
+        step('coverage', 'assert', '--note',
                       'Original outcome and confirmed defect map to R-01, W-01, A-01 and F-01')
         step('preview', 'A-01')
-        # Inspection alone is not authorization: without the operator the run is refused.
-        step('approve', 'A-01', '--note',
-             'Fixture verifier was authored above and inspected; it performs one assertion with no external effects')
+        # Unapproved verifiers never run; approval is automatic and logged as a decision.
         step('run', 'A-01', expected=2)
-        # The same approve command, this time through an asked-and-approved host prompt.
-        operator_step('approve', 'A-01', '--note',
+        step('approve', 'A-01', '--note',
              'Fixture verifier was authored above and inspected; it performs one assertion with no external effects')
         red = json.loads(step('run', 'A-01', '--red'))
         if red['result'] != 'RED-OK': raise RuntimeError('Intentional baseline not accepted')
@@ -97,9 +68,9 @@ def main():
         step('work', 'set', '--id', 'W-01', '--status', 'verified')
         step('finding', 'set', '--id', 'F-01', '--status', 'fixed-verified', '--work', 'W-01', '--check', 'A-01',
              '--note', 'Actual faulty baseline reproduced; root value repaired and regression verified')
-        operator_step('review-policy', 'self', '--authority',
+        step('review-policy', 'self', '--authority',
                       'Fixture operator accepts a self review for this demonstration')
-        operator_step('coverage', 'assert', '--note', 'Reconciled after the review-policy decision')
+        step('coverage', 'assert', '--note', 'Reconciled after the review-policy decision')
         step('review', '--kind', 'self', '--reviewer', 'deterministic local fixture', '--note',
              'Final fixture contract and real assertion inspected', '--evidence', str(artifact))
         if json.loads(step('gate'))['status'] != 'COMPLETE': raise RuntimeError('Valid fixture not completed')
@@ -123,16 +94,16 @@ def main():
         step('check', 'set', '--id', 'A-02', '--status', 'PASS',
              '--note', 'Observed at 1280x800; banner and totals as specified', '--evidence', str(observation))
         step('work', 'set', '--id', 'W-02', '--status', 'verified')
-        operator_step('coverage', 'assert', '--note', 'Both outcomes mapped; R-02 is observable only by a person')
+        step('coverage', 'assert', '--note', 'Both outcomes mapped; R-02 is observable only by a person')
         blocked = json.loads(step('gate', expected=1))
         if not any('self-attested' in reason for reason in blocked['reasons']):
             raise RuntimeError('A solely attested requirement was not refused')
         counts = blocked['attestation']
         if (counts['executed'], counts['self_attested']) != (1, 1):
             raise RuntimeError('Acceptance basis was not counted correctly')
-        operator_step('req', 'attest-only', '--id', 'R-02',
+        step('req', 'attest-only', '--id', 'R-02',
                       '--authority', 'Operator accepts a recorded human observation for this outcome')
-        operator_step('coverage', 'assert', '--note', 'Reconciled after recording attested-only authority')
+        step('coverage', 'assert', '--note', 'Reconciled after recording attested-only authority')
         step('review', '--kind', 'self', '--reviewer', 'deterministic local fixture',
              '--note', 'Both outcomes reconciled; R-02 rests on a recorded human observation', '--evidence', str(artifact))
         if json.loads(step('gate'))['status'] != 'COMPLETE':
@@ -141,7 +112,7 @@ def main():
         for expected in ('SELF-ATTESTED', 'COMMAND CAPTURE', 'attested-only by operator authority', 'not semantic proof'):
             if expected not in report:
                 raise RuntimeError(f'Report did not disclose {expected}')
-    print('DMD_DEMO_PASS:operator-channel-approvals;real-red-green-and-stale-rejection;'
+    print('DMD_DEMO_PASS:automatic-logged-approvals;real-red-green-and-stale-rejection;'
           'attested-only-refused-then-authorized;temporary-fixtures-removed')
     return 0
 
