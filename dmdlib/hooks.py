@@ -1,6 +1,7 @@
 """Claude Code lifecycle adapters; hooks never execute verification commands."""
 from __future__ import annotations
 import json
+import re
 import sys
 from pathlib import Path
 from .storage import DmdError, append_line, atomic, digest, lock, now, read_json, safe_text, save
@@ -86,6 +87,16 @@ def quick_activity(root, binding, cwd, payload, event):
     return True
 
 
+# Turns the host injects on its own (a background task finishing, command output). Their
+# text can carry what the agent wrote, so it is never captured as the operator's words.
+MACHINE_TAGS = ("task-notification", "system-reminder", "local-command-stdout", "local-command-stderr",
+                "local-command-caveat", "bash-stdout", "bash-stderr")
+
+
+def machine_turn(prompt):
+    return isinstance(prompt, str) and re.match(r"\s*<(" + "|".join(MACHINE_TAGS) + r")\b", prompt) is not None
+
+
 def handle(args):
     """Hooks fail open. The only nonzero exit is TaskCompleted enforcement; every internal
     error becomes a systemMessage naming the cause and exit 0, because a hook that exits 2
@@ -124,8 +135,9 @@ def _handle(args):
         print(json.dumps({"systemMessage": "Done Means Done: no valid session/worktree identity; no task was selected."}))
         return 0
     if args.event == "user-prompt-submit":
-        # Scheduled/automatic turns must not replace an operator's captured request.
-        if payload.get("prompt_source") not in (None, "user"):
+        # Scheduled/automatic turns must not replace an operator's captured request, nor
+        # become words the agent can quote as the operator's (store.operator_quote).
+        if payload.get("prompt_source") not in (None, "user") or machine_turn(payload.get("prompt")):
             return 0
         capture_prompt(session, cwd, payload.get("prompt"))
         return 0

@@ -10,6 +10,9 @@
   last 50 per worktree. The request and amendments never count, a quote authorizes one
   decision only, and `authority withdraw` needs a quote when the reversal loosens the
   contract (new `--authority`). Nothing prompts. ADR 0006.
+- **Host-injected turns are not the operator.** UserPromptSubmit no longer captures
+  `<task-notification>`, `<system-reminder>` or local command output: they could be quoted as
+  operator words, and one could replace the request `init --from-host` binds to.
 - Test-file lint cleaned (unused imports, a dead variable); `pyflakes` is clean repo-wide.
 
 - **Nothing asks the operator.** Contract decisions (`AU-*`), verifier approvals included,

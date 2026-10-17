@@ -42,8 +42,10 @@ test_unconfirmed_legacy_decision_blocks_until_confirmed (test_anticheat.LegacyDe
 test_a_prompt_captured_before_the_task_does_not_count (test_anticheat.OperatorWords.test_a_prompt_captured_before_the_task_does_not_count) ... ok
 test_amendment_text_cannot_launder_authority (test_anticheat.OperatorWords.test_amendment_text_cannot_launder_authority) ... ok
 test_an_agent_amendment_never_spends_the_operators_quote (test_anticheat.OperatorWords.test_an_agent_amendment_never_spends_the_operators_quote) ... ok
+test_an_injected_turn_does_not_replace_the_captured_request (test_anticheat.OperatorWords.test_an_injected_turn_does_not_replace_the_captured_request) ... ok
 test_another_worktree_prompt_does_not_count (test_anticheat.OperatorWords.test_another_worktree_prompt_does_not_count) ... ok
 test_config_without_a_mode_key_still_checks_lowering (test_anticheat.OperatorWords.test_config_without_a_mode_key_still_checks_lowering) ... ok
+test_host_injected_turns_are_never_operator_words (test_anticheat.OperatorWords.test_host_injected_turns_are_never_operator_words) ... ok
 test_lowering_enforcement_needs_quote_raising_does_not (test_anticheat.OperatorWords.test_lowering_enforcement_needs_quote_raising_does_not) ... ok
 test_operator_words_after_init_authorize_it (test_anticheat.OperatorWords.test_operator_words_after_init_authorize_it) ... ok
 test_other_loosening_decisions_need_quotes (test_anticheat.OperatorWords.test_other_loosening_decisions_need_quotes) ... ok
@@ -385,7 +387,7 @@ test_watchdog_releases_the_stop_but_never_the_obligations (test_runtime.RuntimeC
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 383 tests in 99.643s
+Ran 385 tests in 100.200s
 
 OK
-DMD_TESTS_PASS:383;skipped=0
+DMD_TESTS_PASS:385;skipped=0
