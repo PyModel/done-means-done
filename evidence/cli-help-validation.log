@@ -1,5 +1,5 @@
 $ dmd --version
-0.8.0
+0.9.0
 $ dmd --help
 usage: dmd [-h] [--version] [--cwd CWD] [--task TASK] COMMAND ...
 
@@ -30,15 +30,14 @@ positional arguments:
     reconcile      Re-derive the handoff on resume and print it
     state          Set the task ACTIVE, PAUSED, or CANCELLED with a reason
     amend          Record an operator amendment to the request
-    review-policy  Request an operator-confirmed independent/self review
-                   policy
+    review-policy  Set the independent/self review policy
     attempt        Record a failed attempt signature for a requirement, work
                    item, check or finding
     bind-session   Bind a host session ID to this task
     map-host-task  Map a native host todo ID to a work item
     recover-run    Clear an interrupted run after checking the runner
-    authority      List operator decisions; ask the operator to confirm one,
-                   or withdraw it
+    authority      List contract decisions; confirm one recorded before
+                   automatic approval, or withdraw it
     config         Set the hook mode (off, observe, enforce) and watchdog
                    limit
     hook           Entry point for installed host lifecycle hooks

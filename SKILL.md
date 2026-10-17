@@ -4,7 +4,7 @@ description: Finish every part of a substantial assignment (code, research, writ
 license: MIT
 compatibility: Python 3.10+ on macOS or Linux. Git is optional. Claude Code lifecycle hooks are optional and explicitly installed.
 metadata:
-  version: "0.8.0"
+  version: "0.9.0"
 ---
 
 # Done Means Done
