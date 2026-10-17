@@ -51,7 +51,7 @@ python3 "$HOME/.claude/skills/done-means-done/hooks/install.py" --apply
 dmd config --mode enforce
 ```
 
-Until that last command the mode is `observe`, which records and reports without redirecting anything. Nothing asks you for approval: contract changes (cancelling a requirement, deferring a defect, pausing, lowering enforcement) are approved automatically and listed in the report, where `dmd authority withdraw` can reverse them. After upgrading from 0.8.0, rerun `install.py --apply` so the old PreToolUse hook is removed. The installer merges into your existing settings, backs up what it changes, leaves unrelated hooks alone, and can remove exactly what it added. Start a new session afterward.
+Until that last command the mode is `observe`, which records and reports without redirecting anything. Nothing asks you for approval. Contract changes are approved automatically and listed in the report, where `dmd authority withdraw` can reverse them; the ones that loosen it (cancelling a requirement, deferring a defect, pausing, lowering enforcement) are refused unless the agent quotes something you typed after the task began. After upgrading from 0.8.0, rerun `install.py --apply` so the old PreToolUse hook is removed. The installer merges into your existing settings, backs up what it changes, leaves unrelated hooks alone, and can remove exactly what it added. Start a new session afterward.
 
 Then invoke it:
 

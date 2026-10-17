@@ -27,6 +27,9 @@ class AdoptionCase(unittest.TestCase):
             result = main(['--cwd', str(self.repo), *args])
         self.assertEqual(result, code, (args, result, out.getvalue(), err.getvalue()))
         return out.getvalue()
+    def say(self, text):
+        with patch('sys.stdin', io.StringIO(json.dumps({'cwd': str(self.repo), 'session_id': 'adoption', 'prompt': text}))):
+            self.cli('hook', 'user-prompt-submit')
     def install(self, *args, code=0, settings=None):
         p = subprocess.run([sys.executable, '-B', str(ROOT / 'hooks/install.py'), '--settings', str(settings or self.settings), '--state-dir', str(self.state), *args], capture_output=True, text=True, timeout=15)
         self.assertEqual(p.returncode, code, (p.stdout, p.stderr))
@@ -135,12 +138,12 @@ class AdoptionCase(unittest.TestCase):
     def test_migration_refuses_the_same_record_twice_without_new(self):
         source=self.old(); self.cli('migrate','--from-task',str(source),'--authority','explicit import')
         first=load_task(locate(self.repo))['task_id']
-        self.cli('state','CANCELLED','--reason','operator stopped it')
+        self.say('operator stopped it'); self.cli('state','CANCELLED','--reason','operator stopped it','--authority','operator stopped it')
         with contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertEqual(main(['--cwd',str(self.repo),'migrate','--from-task',str(source),'--authority','explicit import']),2)
         self.assertIn('already imported as '+first, err.getvalue())
         self.assertEqual(load_task(locate(self.repo))['task_id'],first)
-        self.cli('migrate','--from-task',str(source),'--authority','explicit import','--new')
+        self.say('explicit import'); self.cli('migrate','--from-task',str(source),'--authority','explicit import','--new')
         self.assertNotEqual(load_task(locate(self.repo))['task_id'],first)
     def test_migration_recovers_unmapped_obligations(self):
         source=self.old(requirements=[], work_items=[{'id':'W-01','text':'lost owner','req':None,'deps':[]}]); self.cli('migrate','--from-task',str(source),'--authority','explicit import')

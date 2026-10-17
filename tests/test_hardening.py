@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import subprocess
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -40,7 +39,7 @@ class IncidentCase(HookHarness):
     def test_paused_task_with_deleted_input_never_fails_a_hook(self):
         scratch = self.home / "scratchpad"; scratch.mkdir(); gate_script = scratch / "api-gate.sh"; gate_script.write_text("exit 0\n")
         self.setup_task(); self.cmd("check", "edit", "--id", "A-01", "--input", str(gate_script))
-        self.cmd("state", "PAUSED", "--reason", "operator paused")
+        self.say("operator approves"); self.cmd("state", "PAUSED", "--reason", "operator paused", "--authority", "operator approves")
         shutil.rmtree(scratch)
         self.enforce()
         for event in ("session-start", "stop", "post-tool-use", "task-completed"):
@@ -120,7 +119,7 @@ class IsolationCase(HookHarness):
         self.assertLessEqual(len(t.get("watchdogs", {})), 50)
 
     def test_watchdog_release_names_the_session(self):
-        self.setup_task(); self.enforce(); self.cmd("config", "--max-no-progress", "1")
+        self.setup_task(); self.enforce(); self.say("operator approves"); self.cmd("config", "--max-no-progress", "1", "--authority", "operator approves")
         self.hook("stop"); out, _ = self.hook("stop")
         self.assertIn("released", json.loads(out)["systemMessage"])
         self.assertIn(digest("session-test")[:12], load_task(locate(self.repo))["released"]["reason"])
@@ -171,6 +170,7 @@ class DeferralCase(DmdFixture):
         self.setup_task(); self.cmd("finding", "add", "third-party bug", "--location", "vendor/x.py:1", "--origin", "dependency", "--status", "confirmed")
         _, err = self.cmd("finding", "set", "--id", "F-01", "--status", "deferred", code=2); self.assertIn("finding defer", err)
         _, err = self.cmd("finding", "defer", "--id", "F-01", "--note", "upstream owns it", code=2); self.assertIn("--authority", err)
+        self.say("operator: defer vendor bug, tracked upstream")
         self.cmd("finding", "defer", "--id", "F-01", "--note", "upstream owns it", "--authority", "operator: defer vendor bug, tracked upstream")
         # Deferral is an amendment to the contract, so coverage is reasserted like any amendment.
         self.cmd("coverage", "assert", "--note", "F-01 deferred under operator authority; inventory unchanged")

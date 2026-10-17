@@ -38,7 +38,7 @@ Installation is explicit. The adapters read documented event payloads and do not
 
 | Event | Implemented behavior |
 |---|---|
-| `UserPromptSubmit` | Capture the operator-submitted prompt for this session/worktree (automatic turns do not overwrite it); `init --from-host` binds the task to it |
+| `UserPromptSubmit` | Capture the operator-submitted prompt for this session/worktree (automatic turns do not overwrite it); `init --from-host` binds the task to it, and the last 50 prompts per worktree are the only words that can authorize a loosening decision |
 | `SessionStart` | Resolve/bind a real session and worktree; inject a short restore instruction, never raw tool output as privileged instructions |
 | `Stop` | Recompute root acceptance; in enforce mode block unfinished executable work, with semantic no-progress protection |
 | `TaskCompleted` | For an explicitly mapped native task, return exit 2 with stderr when its mapped work lacks current evidence |

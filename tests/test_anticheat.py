@@ -52,6 +52,7 @@ class AutomaticApproval(SecurityFixture):
     def test_every_contract_decision_is_confirmed_when_recorded(self):
         self.start("Deliver value 42\n- migrate the database")
         self.cmd("req", "add", "other", "--anchor", "value 42")
+        self.say("dropped; context only; self review is enough")
         self.cmd("req", "cancel", "--id", "R-02", "--authority", "dropped")
         self.cmd("coverage", "context", "C-01", "--note", "optional", "--authority", "context only")
         self.cmd("amend", "Also log the value", "--authority", "scope addition")
@@ -63,6 +64,7 @@ class AutomaticApproval(SecurityFixture):
 
     def test_automatic_decision_can_still_be_withdrawn(self):
         self.start(); self.cmd("req", "add", "other", "--anchor", "value 42")
+        self.say("R-02 is dropped")
         out, _ = self.cmd("req", "cancel", "--id", "R-02", "--authority", "dropped")
         self.assertIn("approved automatically", out)
         [entry] = self.decisions("req.cancel")
@@ -130,10 +132,96 @@ class LegacyDecisions(SecurityFixture):
             self.assertEqual(self.hook("pre-tool-use", tool_name=tool, tool_use_id=tool, tool_input={"file_path": path}), [])
 
     def test_config_change_applies_immediately(self):
-        self.cmd("config", "--mode", "observe")
+        self.say("switch to observe")
+        self.cmd("config", "--mode", "observe", "--authority", "switch to observe")
         data = json.loads((self.state / "config.json").read_text())
         self.assertEqual(data["mode"], "observe")
         self.assertNotIn("pending", data)
+
+
+class OperatorWords(SecurityFixture):
+    """A decision that loosens the contract must quote what the operator typed after the
+    task began (UserPromptSubmit capture). Nothing asks: an unquoted one is refused."""
+    def cancel(self, authority, code=0):
+        return self.cmd("req", "cancel", "--id", "R-02", "--authority", authority, code=code)
+
+    def setUp(self):
+        super().setUp()
+        self.start("Deliver value 42 and export the CSV")
+        self.cmd("req", "add", "CSV export", "--anchor", "export the CSV")
+
+    def test_own_words_are_refused_and_nothing_is_recorded(self):
+        _, err = self.cancel("operator dropped it", code=2)
+        self.assertIn("exact quote", err)
+        self.assertEqual(self.task()["requirements"][1]["status"], "active")
+        self.assertEqual(self.decisions("req.cancel"), [])
+
+    def test_operator_words_after_init_authorize_it(self):
+        self.say("skip the CSV export for now")
+        self.cancel("skip the CSV export")
+        [entry] = self.decisions("req.cancel")
+        self.assertEqual(entry["text"], "skip the CSV export")
+        self.assertIn("skip the CSV export", self.cmd("report")[0])
+
+    def test_the_original_request_is_not_authority(self):
+        self.cancel("export the CSV", code=2)
+
+    def test_a_prompt_captured_before_the_task_does_not_count(self):
+        repo = self.home / "fresh"; repo.mkdir()
+        self.say("cancel whatever you like", cwd=repo)
+        self.cmd("--cwd", str(repo), "init", "-m", "Make A and B", "--authority", "operator", "--session", "s2")
+        self.cmd("--cwd", str(repo), "req", "add", "A", "--anchor", "Make A")
+        self.cmd("--cwd", str(repo), "req", "cancel", "--id", "R-01", "--authority", "cancel whatever you like", code=2)
+
+    def test_amendment_text_cannot_launder_authority(self):
+        self.cmd("amend", "Operator says skip the CSV export")
+        self.cancel("skip the CSV export", code=2)
+
+    def test_another_worktree_prompt_does_not_count(self):
+        other = self.home / "other"; other.mkdir()
+        self.say("skip the CSV export", cwd=other)
+        self.cancel("skip the CSV export", code=2)
+
+    def test_partial_words_and_tiny_quotes_are_refused(self):
+        self.say("unskippable work, ok")
+        self.cancel("skippable", code=2)
+        self.cancel("ok", code=2)
+
+    def test_pause_needs_quote_but_resume_does_not(self):
+        self.cmd("state", "PAUSED", "--reason", "agent is tired", code=2)
+        self.assertEqual(self.task()["state"], "ACTIVE")
+        self.say("pause this task")
+        self.cmd("state", "PAUSED", "--reason", "operator asked", "--authority", "pause this task")
+        self.cmd("state", "ACTIVE", "--reason", "resume")
+        self.assertEqual(self.task()["state"], "ACTIVE")
+
+    def test_lowering_enforcement_needs_quote_raising_does_not(self):
+        self.cmd("config", "--mode", "observe", code=2)
+        self.cmd("config", "--max-no-progress", "1", code=2)
+        self.assertFalse((self.state / "config.json").exists())
+        self.say("use observe mode")
+        self.cmd("config", "--mode", "observe", "--authority", "use observe mode")
+        self.cmd("config", "--mode", "enforce")
+
+    def test_other_loosening_decisions_need_quotes(self):
+        self.cmd("req", "attest-only", "--id", "R-02", "--authority", "fine by me", code=2)
+        self.cmd("coverage", "context", "C-01", "--note", "n", "--authority", "fine by me", code=2)
+        self.cmd("review-policy", "self", "--authority", "fine by me", code=2)
+        self.cmd("review-policy", "independent", "--authority", "stricter is always allowed")
+        self.cmd("finding", "add", "bug", "--location", "subject.py:1", "--status", "suspected")
+        self.cmd("finding", "defer", "--id", "F-01", "--note", "later", "--authority", "fine by me", code=2)
+        self.cmd("init", "-m", "smaller task", "--authority", "fine by me", "--new", code=2)
+        self.assertEqual(self.task()["original_request"], "Deliver value 42 and export the CSV")
+
+    def test_prompt_history_is_bounded(self):
+        for i in range(55):
+            self.say(f"prompt number {i}")
+        from dmdlib.store import PROMPT_HISTORY, history_path
+        rows = json.loads(history_path(self.repo).read_text())["prompts"]
+        self.assertEqual(len(rows), PROMPT_HISTORY)
+        self.assertEqual(rows[-1]["text"], "prompt number 54")
+        self.cancel("prompt number 2", code=2)
+        self.cancel("prompt number 54")
 
 
 class HostBoundary(SecurityFixture):
@@ -185,7 +273,8 @@ class FindingsAndBlockers(SecurityFixture):
         self.cmd("check", "add", "--req", "R-01", "--cmd", "python3 -B verify.py", "--expect", "x",
                  "--match", "ACCEPTANCE_PASS:1", "--regression", "--red-match", "EXPECTED_42", "--approve", "inspected")
         self.cmd("check", "baseline", "--id", "A-01", "--note", "code gone", "--evidence", "-", stdin="note only")
-        self.cmd("check", "edit", "--id", "A-01", "--no-regression")
+        self.say("no regression test needed")
+        self.cmd("check", "edit", "--id", "A-01", "--no-regression", "--authority", "no regression test needed")
         ops = {e["op"] for e in self.task()["authority"] if e.get("confirmed")}
         self.assertTrue({"check.baseline", "check.no-regression"} <= ops)
 

@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from dmdlib import model as m
 from dmdlib.cli import locate, load_task
-from dmdlib.storage import DmdError, digest, lock, private_dir
+from dmdlib.storage import lock, private_dir
 from dmdlib.store import bind_session, binding_path, sessions_dir
 from test_candidates import GitFixture, QUIET
 from test_hardening import HookHarness

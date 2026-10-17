@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 from dmdlib import model as m
 from dmdlib.cli import load_task, locate
-from dmdlib.storage import digest
 import test_model
 import test_runtime
 
@@ -65,13 +64,13 @@ class SuspendedTaskHooks(test_runtime.DmdFixture):
     def test_task_completed_on_a_paused_task_does_not_reject_verified_work(self):
         self.setup_task(); self.cmd("config", "--mode", "enforce"); self.cmd("map-host-task", "--host-id", "n42", "--work", "W-01")
         self.cmd("run", "A-01"); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
-        self.cmd("state", "PAUSED", "--reason", "operator pause")
+        self.say("operator approves"); self.cmd("state", "PAUSED", "--reason", "operator pause", "--authority", "operator approves")
         self.cmd("hook", "task-completed", stdin=self.payload(task_id="n42"), code=0)
 
 
 class StopGovernance(test_runtime.DmdFixture):
     def enforce(self, cap="6"):
-        self.cmd("config", "--mode", "enforce", "--max-no-progress", cap)
+        self.say("operator approves"); self.cmd("config", "--mode", "enforce", "--max-no-progress", cap, "--authority", "operator approves")
 
     def stop(self, **payload):
         out, _ = self.cmd("hook", "stop", stdin=self.payload(**payload))
@@ -257,6 +256,7 @@ class NoCheapExits(test_runtime.DmdFixture):
         self.setup_task()
         self.cmd("req", "add", "Second", "--anchor", "value 42")
         self.cmd("work", "add", "after W-01", "--req", "R-02", "--dep", "W-01")
+        self.say("operator dropped it")
         _, err = self.cmd("req", "cancel", "--id", "R-01", "--authority", "operator dropped it", code=2)
         self.assertIn("W-02", err)
         self.cmd("work", "set", "--id", "W-02", "--clear-deps")
@@ -278,7 +278,6 @@ class VolatileSource(unittest.TestCase):
     def test_a_file_that_never_settles_is_drift_not_a_crash(self):
         import tempfile
         from pathlib import Path
-        from unittest.mock import patch
         from dmdlib import source
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); (root / "stable.txt").write_text("a"); (root / "server.log").write_text("b")
@@ -339,7 +338,8 @@ class RequestItemsAreAccounted(test_runtime.DmdFixture):
         self.assertIn("C-05", json.dumps(g["reasons"]))
         self.assertIn("1 request item(s) unmapped", g["summary"]["headline"])
         self.assertIn("dmd coverage context C-05 --note", g["next"][0]["action"])
-        self.cmd("coverage", "context", "C-05", "--note", "the old endpoint is untouched by this change")
+        self.say("the old endpoint is context")
+        self.cmd("coverage", "context", "C-05", "--note", "the old endpoint is untouched by this change", "--authority", "the old endpoint is context")
         self.cmd("coverage", "assert", "--note", "mapped")
 
     def test_map_links_an_existing_requirement(self):
@@ -424,6 +424,7 @@ class AutomaticDecisions(test_runtime.DmdFixture):
     def test_cancel_is_approved_at_once_and_can_be_withdrawn(self):
         self.setup_task()
         self.cmd("req", "add", "second outcome", "--anchor", "value 42")
+        self.say("operator dropped it")
         out, _ = self.cmd("req", "cancel", "--id", "R-02", "--authority", "operator dropped it")
         entry = self.entries("req.cancel")[0]
         self.assertIn(f"{entry['id']}: req.cancel R-02 approved automatically", out)
@@ -437,7 +438,7 @@ class AutomaticDecisions(test_runtime.DmdFixture):
 
     def test_a_pause_takes_effect_and_releases_the_stop(self):
         self.setup_task()
-        self.cmd("state", "PAUSED", "--reason", "operator asked to stop")
+        self.say("operator approves"); self.cmd("state", "PAUSED", "--reason", "operator asked to stop", "--authority", "operator approves")
         out, _ = self.cmd("hook", "stop", stdin=self.payload())
         self.assertNotIn("decision", json.loads(out) if out.strip() else {})
 
@@ -445,14 +446,15 @@ class AutomaticDecisions(test_runtime.DmdFixture):
         self.setup_task()
         out, _ = self.cmd("hook", "stop", stdin=self.payload())
         self.assertEqual(json.loads(out)["decision"], "block")
-        _, err = self.cmd("config", "--mode", "observe")
+        self.say("observe is fine")
+        _, err = self.cmd("config", "--mode", "observe", "--authority", "observe is fine")
         self.assertEqual(err, "")
         out, _ = self.cmd("hook", "stop", stdin=self.payload())
         self.assertNotIn("decision", json.loads(out))
 
     def test_supersede_is_approved_and_can_be_withdrawn(self):
         self.setup_task(); old = locate(self.repo)
-        self.cmd("init", "-m", "tiny replacement", "--authority", "operator", "--new")
+        self.say("operator approves"); self.cmd("init", "-m", "tiny replacement", "--authority", "operator approves", "--new")
         self.assertNotIn("init.new", json.dumps(self.gate()["reasons"]))
         self.cmd("authority", "withdraw", self.entries("init.new")[0]["id"])
         self.assertEqual(locate(self.repo), old)

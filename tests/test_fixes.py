@@ -1,14 +1,10 @@
 """Regressions for the 0.4.0 defect review: attestation visibility, portability, execution and recovery."""
-import io
 import json
 import os
-import contextlib
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dmdlib.cli import main
 from test_runtime import DmdFixture
 
 
@@ -58,6 +54,7 @@ class AttestationCase(DmdFixture):
         self.cmd(*self.attested_task())
         self.attest_pass()
         self.cmd("work", "set", "--id", "W-01", "--status", "verified")
+        self.say("Operator accepts manual acceptance for this outcome; operator accepts self review here")
         self.cmd("req", "attest-only", "--id", "R-01",
                  "--authority", "Operator accepts manual acceptance for this outcome")
         self.cmd("review-policy", "self", "--authority", "operator accepts self review here")
@@ -94,6 +91,7 @@ class AttestationCase(DmdFixture):
 
     def test_attested_only_authority_is_rendered_in_the_report(self):
         self.cmd(*self.attested_task())
+        self.say("Operator accepted manual acceptance")
         self.cmd("req", "attest-only", "--id", "R-01", "--authority", "Operator accepted manual acceptance")
         out, _ = self.cmd("report")
         self.assertIn("attested-only by operator authority", out)
@@ -236,13 +234,13 @@ class LedgerCorrectionCase(DmdFixture):
 
     def test_regression_flag_can_be_corrected(self):
         self.setup_task(regression=True)
-        self.cmd("check", "edit", "--id", "A-01", "--no-regression", "--match", "ACCEPTANCE_PASS:1")
+        self.say("operator approves"); self.cmd("check", "edit", "--id", "A-01", "--no-regression", "--match", "ACCEPTANCE_PASS:1", "--authority", "operator approves")
         out, _ = self.cmd("status", "--json")
         self.assertFalse(json.loads(out)["task"]["checks"][0]["regression"])
 
     def test_regression_correction_is_recorded_in_history(self):
         self.setup_task(regression=True)
-        self.cmd("check", "edit", "--id", "A-01", "--no-regression", "--match", "ACCEPTANCE_PASS:1")
+        self.say("operator approves"); self.cmd("check", "edit", "--id", "A-01", "--no-regression", "--match", "ACCEPTANCE_PASS:1", "--authority", "operator approves")
         out, _ = self.cmd("status", "--json")
         history = json.loads(out)["task"]["checks"][0]["history"]
         self.assertTrue(any(h.get("definition", {}).get("regression") for h in history))

@@ -3,19 +3,16 @@ import contextlib
 import io
 import json
 import os
-import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from dmdlib.cli import main, locate, load_task
-from dmdlib.model import task_fingerprint
 from dmdlib.source import fingerprint
-from dmdlib.storage import DmdError, atomic, ident, lock, private_dir, read_json, redact, save
-from dmdlib.runner import execute, approval_signature
+from dmdlib.storage import DmdError, lock, private_dir, redact
+from dmdlib.runner import execute
 
 class DmdFixture(unittest.TestCase):
     """Shared harness: temporary project, isolated state, CLI driver. No tests of its own."""
@@ -35,6 +32,7 @@ class DmdFixture(unittest.TestCase):
         return out.getvalue(), err.getvalue()
     def setup_task(self, regression=False, command="python3 -B verify.py", extra=()):
         self.cmd("init", "-m", "Deliver value 42", "--authority", "explicit operator invocation", "--session", "session-test")
+        self.say("fixture operator accepts self review")
         self.cmd("review-policy", "self", "--authority", "fixture operator accepts self review")
         self.cmd("req", "add", "Value is 42", "--anchor", "value 42")
         self.cmd("work", "add", "Implement and test value", "--req", "R-01")
@@ -48,6 +46,9 @@ class DmdFixture(unittest.TestCase):
         self.cmd("work", "set", "--id", "W-01", "--status", "verified")
         self.cmd("review", "--kind", "self", "--reviewer", "test reviewer", "--note", "Reviewed final request and candidate", "--evidence", str(self.review))
         out, _ = self.cmd("gate"); self.assertEqual(json.loads(out)["status"], "COMPLETE")
+    def say(self, text, cwd=None):
+        """What the operator types: a prompt captured by the UserPromptSubmit hook."""
+        self.cmd("hook", "user-prompt-submit", stdin=self.payload(prompt=text, **({"cwd": str(cwd)} if cwd else {})))
     def payload(self, **updates):
         p = {"cwd": str(self.repo), "session_id": "session-test", "stop_hook_active": False}; p.update(updates); return json.dumps(p)
 
@@ -92,10 +93,10 @@ class RuntimeCase(DmdFixture):
     def test_initialization_collision_cannot_overwrite(self):
         self.cmd("--task", "T-fixed", "init", "-m", "original", "--authority", "operator")
         directory = locate(self.repo); before = (directory / "task.json").read_bytes()
-        self.cmd("--task", "T-fixed", "init", "-m", "replacement", "--authority", "operator", "--new", code=2)
+        self.say("operator approves"); self.cmd("--task", "T-fixed", "init", "-m", "replacement", "--authority", "operator approves", "--new", code=2)
         self.assertEqual(before, (directory / "task.json").read_bytes())
     def test_new_task_preserves_old_as_paused(self):
-        self.setup_task(); old = locate(self.repo); self.cmd("init", "-m", "new assignment", "--authority", "operator", "--new")
+        self.setup_task(); old = locate(self.repo); self.say("operator approves"); self.cmd("init", "-m", "new assignment", "--authority", "operator approves", "--new")
         self.assertEqual(load_task(old)["state"], "PAUSED"); self.assertNotEqual(old, locate(self.repo))
     def test_oversized_state_never_replaces_readable_record(self):
         self.setup_task(); directory = locate(self.repo); before = (directory / "task.json").read_bytes()
@@ -107,7 +108,7 @@ class RuntimeCase(DmdFixture):
     def test_unowned_work_refused(self): self.setup_task(); self.cmd("work", "add", "hidden follow-up", code=2)
     def test_zero_timeout_refused(self): self.setup_task(); self.cmd("check", "edit", "--id", "A-01", "--timeout", "0", code=2)
     def test_cancel_prevents_execution_and_reactivation_needs_authority(self):
-        self.setup_task(); self.cmd("state", "CANCELLED", "--reason", "operator cancelled"); self.cmd("run", "A-01", code=2)
+        self.setup_task(); self.say("operator approves"); self.cmd("state", "CANCELLED", "--reason", "operator cancelled", "--authority", "operator approves"); self.cmd("run", "A-01", code=2)
         self.cmd("state", "ACTIVE", "--reason", "agent prefers to continue", code=2)
     def test_content_edit_preserved_mtime_is_detected(self):
         p = self.repo / "subject.py"; before = p.stat(); old = fingerprint(self.repo)
@@ -172,7 +173,7 @@ class RuntimeCase(DmdFixture):
         out, _ = self.cmd("hook", "stop", stdin=self.payload()); self.assertEqual(json.loads(out)["decision"], "block")
         out, _ = self.cmd("hook", "stop", stdin=self.payload(stop_hook_active=True)); self.assertEqual(json.loads(out)["decision"], "block")
     def test_watchdog_releases_the_stop_but_never_the_obligations(self):
-        self.setup_task(); self.cmd("config", "--mode", "enforce", "--max-no-progress", "2")
+        self.setup_task(); self.say("operator approves"); self.cmd("config", "--mode", "enforce", "--max-no-progress", "2", "--authority", "operator approves")
         outs = [json.loads(self.cmd("hook", "stop", stdin=self.payload(stop_hook_active=True))[0]) for _ in range(3)]
         self.assertEqual([o.get("decision") for o in outs], ["block", "block", None])
         self.assertIn("released", outs[2]["systemMessage"])
@@ -182,7 +183,7 @@ class RuntimeCase(DmdFixture):
         out, _ = self.cmd("hook", "session-start", stdin=self.payload(session_id="next-session"))
         self.assertIn("stopped without verified progress", out)
     def test_release_note_clears_after_verified_progress(self):
-        self.setup_task(); self.cmd("config", "--mode", "enforce", "--max-no-progress", "1")
+        self.setup_task(); self.say("operator approves"); self.cmd("config", "--mode", "enforce", "--max-no-progress", "1", "--authority", "operator approves")
         for _ in range(2): self.cmd("hook", "stop", stdin=self.payload())
         self.assertIn("released", load_task(locate(self.repo)))
         self.cmd("run", "A-01"); self.cmd("hook", "stop", stdin=self.payload())
@@ -191,10 +192,10 @@ class RuntimeCase(DmdFixture):
         self.cmd("init", "-m", "authorized request", "--authority", "operator", "--session", "x" * 513, code=2)
         self.assertIsNone(locate(self.repo))
     def test_off_mode_has_no_hook_effect(self):
-        self.setup_task(); self.cmd("config", "--mode", "off"); d = locate(self.repo); before = (d / "task.json").read_bytes()
+        self.setup_task(); self.say("operator approves"); self.cmd("config", "--mode", "off", "--authority", "operator approves"); d = locate(self.repo); before = (d / "task.json").read_bytes()
         out, err = self.cmd("hook", "session-start", stdin=self.payload()); self.assertEqual(out + err, ""); self.assertEqual(before, (d / "task.json").read_bytes())
     def test_observe_mode_does_not_block_or_pause(self):
-        self.setup_task(); self.cmd("config", "--mode", "observe", "--max-no-progress", "1")
+        self.setup_task(); self.say("operator approves"); self.cmd("config", "--mode", "observe", "--max-no-progress", "1", "--authority", "operator approves")
         for _ in range(3):
             out, _ = self.cmd("hook", "stop", stdin=self.payload()); self.assertNotIn("decision", json.loads(out))
         self.assertEqual(load_task(locate(self.repo))["state"], "ACTIVE")
@@ -227,7 +228,7 @@ class RuntimeCase(DmdFixture):
         out, _ = self.cmd("hook", "stop", stdin=self.payload()); self.assertEqual(json.loads(out)["decision"], "block")
     def test_init_new_moves_the_session_to_the_new_assignment(self):
         # Otherwise `init --new` would leave the session on a paused task no hook enforces.
-        self.setup_task(); old = locate(self.repo); self.cmd("init", "-m", "other", "--authority", "operator", "--new")
+        self.setup_task(); old = locate(self.repo); self.say("operator approves"); self.cmd("init", "-m", "other", "--authority", "operator approves", "--new")
         self.assertEqual(load_task(old)["state"], "PAUSED")
         out, _ = self.cmd("hook", "session-start", stdin=self.payload()); self.assertIn(load_task(locate(self.repo))["task_id"], out)
     def test_session_id_cannot_traverse_state_paths(self):

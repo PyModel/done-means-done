@@ -1,6 +1,5 @@
 """Synthetic state fixtures test the predicate, not agent compliance or real software quality."""
 import copy
-import os
 import tempfile
 import unittest
 from pathlib import Path

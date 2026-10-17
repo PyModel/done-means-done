@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased — automatic approval
+## 0.9.0 — automatic approval, operator-worded loosening
+
+- **Loosening needs the operator's words.** `req cancel`, `req attest-only`, `finding defer`,
+  `coverage context`, `review-policy self`, `state PAUSED|CANCELLED`, `init/migrate --new`,
+  `check edit --no-regression` (new `--authority`) and a lower `config` mode or watchdog
+  limit (new `--authority`) are refused unless `--authority` quotes, exactly, a prompt the
+  operator typed in this worktree after the task began. The UserPromptSubmit hook keeps the
+  last 50 per worktree. The request and amendments never count. Nothing prompts. ADR 0006.
+- Test-file lint cleaned (unused imports, a dead variable); `pyflakes` is clean repo-wide.
 
 - **Nothing asks the operator.** Contract decisions (`AU-*`), verifier approvals included,
   are approved when recorded and stay in the log, the report and `dmd authority withdraw`.

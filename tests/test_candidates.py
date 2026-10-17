@@ -11,8 +11,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from dmdlib.cli import main, locate, load_task
-from dmdlib.model import source_digest, task_fingerprint, check_candidate, source_for
+from dmdlib.cli import locate, load_task
+from dmdlib.model import source_digest, task_fingerprint, source_for
 from dmdlib.source import snapshot, drift, recent_writes, candidate_root
 from test_runtime import DmdFixture
 
@@ -470,7 +470,7 @@ class ReasonCase(GitFixture):
         self.assertEqual(g["summary"]["work_unverified"], ["W-01"])
 
     def test_stop_hook_repeats_the_headline_and_rerun_command(self):
-        self.setup_task(); self.cmd("config", "--mode", "observe"); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
+        self.setup_task(); self.say("operator approves"); self.cmd("config", "--mode", "observe", "--authority", "operator approves"); self.cmd("run", "A-01", *QUIET); self.cmd("work", "set", "--id", "W-01", "--status", "verified")
         (self.repo / "subject.py").write_text("VALUE = 43\n")
         out, _ = self.cmd("hook", "stop", stdin=self.payload())
         message = json.loads(out)["systemMessage"]
@@ -518,7 +518,6 @@ class ReasonCase(GitFixture):
 
     def test_every_subcommand_has_help_text(self):
         from dmdlib.cli import HELP, parser
-        names = [a.dest for a in parser()._subparsers._group_actions][0]
         sub = next(a for a in parser()._actions if isinstance(a, argparse._SubParsersAction))
         self.assertEqual(sorted(sub.choices), sorted(HELP)); self.assertTrue(all(HELP[k].strip() for k in HELP))
         for action in sub._choices_actions:

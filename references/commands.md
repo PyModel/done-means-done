@@ -18,7 +18,7 @@ Every `--evidence` and `--request-file` accepts `-` to read standard input (a he
 | `init --from-host --authority TEXT --session ID` | Bind initialization to the prompt the host captured for this session and worktree (`user-prompt-submit`); refused when no capture exists. A typed `-m`/`--request-file` request that differs from the capture is refused |
 | `init -m TEXT --authority TEXT --new` | Explicitly start another assignment; preserve the previous unfinished task as paused, never overwrite it |
 | `req add TEXT --anchor TEXT [--covers C-01 ...]` | Add one independent outcome/constraint; `--anchor` must be an exact quote from the request or a confirmed amendment |
-| `req cancel --id R-01 --authority TEXT` | Record actual operator removal; invalidate contract coverage. Refused while active work elsewhere depends on its work (`work set --clear-deps` first) |
+| `req cancel --id R-01 --authority QUOTE` | Record actual operator removal (`QUOTE`: the operator's own later words, see *Operator decisions*); invalidate contract coverage. Refused while active work elsewhere depends on its work (`work set --clear-deps` first) |
 | `req attest-only --id R-01 --authority TEXT` | Record operator authority to accept this outcome on attestation alone; named in the report |
 | `work remove --id W-02 --note TEXT` | Supersede an agent-authored work item; refused while a dependency or finding still maps to it |
 | `check remove --id A-02 --note TEXT` | Supersede an agent-authored check; refused if its requirement would be left with none |
@@ -39,7 +39,7 @@ Tasks created since 0.7.0 record every explicit list item of the request (`- x`,
 
 These commands change the contract the agent is held to: `req cancel`, `req attest-only`, `finding defer`, `state`, `review --kind independent`, `init --new` / `migrate --new` over an unfinished task, `config --mode|--max-no-progress`, and `relocate`. Each logs a decision (`AU-01`...) on the task.
 
-Every decision is approved automatically when recorded (`confirmed via auto`); no hook asks the operator and no terminal prompt waits. The log is the audit trail:
+Every decision is approved automatically when recorded (`confirmed via auto`); no hook asks the operator and no terminal prompt waits. Decisions that loosen the contract — `req cancel`, `req attest-only`, `finding defer`, `coverage context`, `review-policy self`, `state PAUSED|CANCELLED`, `init --new` / `migrate --new` over an unfinished task, `check edit --no-regression`, and `config` lowering the mode or `--max-no-progress` — additionally need `--authority` to be an exact, word-bounded quote (4+ characters) of a prompt the operator typed in this worktree after the task was created. The UserPromptSubmit hook keeps the last 50 prompts per worktree (`prompts/root-*.json` in the state root). The original request and amendments are never authority, so the agent cannot cite the requirement it wants to drop or plant an amendment and quote it. Without the hook nothing is captured and these decisions are refused. Tightening (`state ACTIVE`, `review-policy independent`, a stricter `config`) needs no quote. The log is the audit trail:
 
 - every decision is listed by `dmd authority list` and in the report's *Operator decisions* section;
 - `dmd authority withdraw AU-01` restores what the decision changed (newest first);
@@ -52,7 +52,7 @@ dmd authority confirm AU-01        # approve a decision recorded before automati
 dmd authority withdraw AU-01       # undo a decision; what it changed is restored
 ```
 
-Nothing in the hooks intercepts commands: the agent can pause the task, lower enforcement or edit state files without a prompt. This is a cooperative ledger, not a guard against the agent; read the decision log.
+Nothing in the hooks intercepts commands, and a same-user process can still edit state files or forge a hook payload. This is a cooperative ledger with refusals, not a sandbox; read the decision log.
 
 ## Work and acceptance
 
@@ -100,7 +100,7 @@ Only `--method command` produces machine-verified acceptance. `--method manual|r
 
 `--approve NOTE` on `check add` or `check edit` records the same inspected approval as `dmd approve` for the definition as written. The approval binds the exact definition, its declared `--input` files (content-hashed) and the execution environment (shell, PATH, platform, interpreter major.minor). Inspection is the agent's attestation and is approved automatically (`check.approve`). Reapproving an unchanged definition reuses the decision; a changed verifier, input or environment needs a new approval. Any later edit clears the receipt, so edited command text never runs uninspected. Receipts written before 0.8.0 (no confirmed-approval binding) are reported stale and must be reapproved and rerun.
 
-`check edit --id A-01 ...` changes explicitly supplied fields, archives the old definition/evidence, and clears current green, baseline, and pending-import status. Reapprove after any definition/input/runtime approval change; an expired approval names whether the definition, a declared input, or the execution environment drifted. `--no-regression` clears a mis-flagged regression declaration and is recorded in the check history. An edit must leave the entire check valid. `--input` is repeatable and names real files relative to the check working directory or absolute paths; declared missing inputs are errors.
+`check edit --id A-01 ...` (`--no-regression` also needs `--authority QUOTE`) changes explicitly supplied fields, archives the old definition/evidence, and clears current green, baseline, and pending-import status. Reapprove after any definition/input/runtime approval change; an expired approval names whether the definition, a declared input, or the execution environment drifted. `--no-regression` clears a mis-flagged regression declaration and is recorded in the check history. An edit must leave the entire check valid. `--input` is repeatable and names real files relative to the check working directory or absolute paths; declared missing inputs are errors.
 
 Timeout range: greater than zero through 604800 seconds. Captured-output limit: greater than zero through 1048576 bytes. A timed-out or cancelled command gets SIGTERM, then output is read for up to 2 s while its cleanup runs, then SIGKILL. For portable cleanup trap TERM as well as EXIT (`trap cleanup EXIT; trap 'exit 143' TERM`): dash, Debian's `/bin/sh`, skips an EXIT trap on SIGTERM otherwise. Timed-out/overflowed/cancelled commands fail; larger logs cannot be truncated into a passing observation. The runner serializes verification per task and terminates the check's remaining local process group after execution. A command that leaves background descendants holding the output pipes is completed on its own exit status after a short drain rather than being forced to time out; the receipt records `background_holders`.
 
@@ -155,7 +155,7 @@ dmd finding set --id F-02 --status disproved --note "Evidence demonstrates corre
 EVIDENCE
 dmd finding set --id F-03 --status duplicate --duplicate F-01 --note "Same root cause and invariant" \
   --evidence -   # required for a confirmed finding, with the shared executed check
-dmd finding defer --id F-04 --authority "Operator: vendor bug, tracked upstream as #123" \
+dmd finding defer --id F-04 --authority "vendor bug, tracked upstream as #123"   # quoted from the operator's prompt \
   --note "Fix belongs to the dependency; workaround is not authorized"
 ```
 
@@ -208,7 +208,7 @@ Use `self` unless a genuinely separate reviewer performed the review. All other 
 `next` lists every item you can act on now, dependency-ready first, each with the complete command that discharges it; the final review appears only when nothing else is owed. `BLOCKED` means every open reason waits on an unresolved blocker, directly, through its requirement, or through a prerequisite. When reasons remain but no item is dependency-ready, `next` holds one `plan` action naming them. `gate` emits JSON and exits 0 only for COMPLETE, 1 for a valid unfinished/suspended assignment, and 2 for input/infrastructure errors. `run` exits 0 when every listed check is an accepted green or intentional red, 1 when any failed or went stale, and 2 for setup/approval/preflight/exclusive-resource errors. `next` emits JSON; `status --json` exposes state plus computed gate; `report --save` and `handoff` write generated views outside the project. `list` labels stored state, which may need current revalidation, and reports an unreadable record as its own row instead of failing the listing. Exit 3 means a defect in dmd itself, not a usage error: the task record was not advanced and the trace should be reported. A lock held by another `dmd` process is waited out with backoff for `DMD_LOCK_WAIT` seconds (default 5) before exit 2 names the wait; `no active task in this worktree` lists unfinished tasks of sibling worktrees when any exist.
 
 ```bash
-dmd state PAUSED --reason "Operator requested a pause"
+dmd state PAUSED --reason "Operator requested a pause" --authority "pause it for today"   # quote of their prompt
 dmd state ACTIVE --reason "Operator resumed after checkpoint review"
 dmd state CANCELLED --reason "Operator cancelled the assignment"
 dmd state ACTIVE --reason "Operator explicitly restarted the cancelled assignment" --authority "Actual instruction"
@@ -224,6 +224,7 @@ dmd attempt W-02 "Concrete failure signature" --strategy "Different experiment a
 dmd bind-session ACTUAL_SESSION_ID
 dmd map-host-task --host-id ACTUAL_NATIVE_TASK_ID --work W-01
 dmd config --mode enforce --max-no-progress 6   # enforce is the default since 0.8.0; observe is the explicit opt-out
+dmd config --mode observe --authority "switch dmd to observe"   # lowering quotes the operator
 dmd migrate --from-task /absolute/legacy/task.json --authority "Operator approved this import"
 ```
 

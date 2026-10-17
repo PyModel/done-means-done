@@ -16,10 +16,10 @@ from .source import candidate_root, file_digest, git, location_file, output_matc
 from .model import (FINDING_STATES, FINISHED, OPERATOR_FINDING_STATES, SUSPENDED, WORK_STATES, acceptance_reason, assess, attested, check_candidate, effective_state,
                     check_definition, missing_inputs, contract_digest, extract_clauses, gate, get, live, unmapped_clauses, new_id, repeated_attempts,
                     review_signature, source_digest, source_for, task_fingerprint)
-from .source import MissingCandidate
+from .source import MissingCandidate, identity
 from .runner import approval_parts, SHELL
 from .runs import run_checks
-from .store import (prune_empty_record_dirs, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate,
+from .store import (operator_quote, prune_empty_record_dirs, base_dir, bind_session, bindings, config_errors, create_task, load_config, load_task, locate,
                     DEFAULT_CONFIG, prune_run_index, pid_alive, prune_sessions, rebind_sessions, remember_session, unindex_run,
                     withdraw_supersede, require_text, save_config, sibling_tasks, state_root, task_records, transaction)
 from .report import SECTIONS, render
@@ -99,8 +99,7 @@ def req(args):
             r = get(t["requirements"], args.id)
             prior = {"record": copy.deepcopy(r), "amendment_at": now()}
             r["attest_only"] = True
-            r["attest_only_authority"] = require_text(
-                args.authority, "explicit operator instruction accepting attested-only acceptance")
+            r["attest_only_authority"] = quoted(t, args.authority, "--authority accepting attested-only acceptance")
             t["amendments"].append({"at": prior["amendment_at"], "text": "attested-only acceptance authorized: " + r["attest_only_authority"],
                                     "requirement": r["id"]})
             print(r["id"] + " may be accepted on attestation alone under recorded operator authority")
@@ -115,7 +114,7 @@ def req(args):
                                f"(dmd work set --id W-XX --clear-deps, then --dep as needed)")
             prior = {"record": copy.deepcopy(r), "amendment_at": now()}
             r["status"] = "removed"
-            r["authority"] = require_text(args.authority, "explicit operator removal instruction")
+            r["authority"] = quoted(t, args.authority, "--authority removing this requirement")
             t["amendments"].append({"at": prior["amendment_at"], "text": r["authority"], "requirement": r["id"]})
             print(r["id"] + " cancelled under recorded operator authority")
             operator_decision(t, "req.cancel", r["id"], r["authority"], prior)
@@ -352,7 +351,7 @@ def check(args):
                                    "observing anything. Match a string the verifier's own output emits after its assertions "
                                    "(a test runner's summary line, a script's final print)")
             if args.action == "edit" and args.no_regression and prior_check.get("regression"):
-                operator_decision(t, "check.no-regression", c["id"], args.note or "remove regression protection",
+                operator_decision(t, "check.no-regression", c["id"], quoted(t, args.authority, "--authority removing regression protection"),
                                   {"record": prior_check}, digest(check_definition(c)))
             if args.approve is not None:
                 if c["method"] != "command":
@@ -449,7 +448,7 @@ def finding(args):
             prior = {"record": copy.deepcopy(f), "amendment_at": now()}
             f["status"] = "deferred"
             f["note"] = require_text(args.note, "--note explaining why this defect is deferred rather than fixed")
-            f["authority"] = require_text(args.authority, "explicit operator instruction deferring this finding (--authority)")
+            f["authority"] = quoted(t, args.authority, "--authority deferring this finding")
             f["deferred_at"] = now()
             t["amendments"].append({"at": prior["amendment_at"], "text": "finding deferred under operator authority: " + f["authority"], "finding": f["id"]})
             print(f["id"] + " deferred under recorded operator authority; it is disclosed in every report")
@@ -580,12 +579,13 @@ def coverage(args):
                 r = get(t["requirements"], require_text(args.req, "--req naming the requirement that covers them"))
                 r["covers"] = sorted(set(r.get("covers") or []) | {c["id"] for c in clauses})
             note = None if args.action == "map" else require_text(args.note, "--note saying why these items are context, not outcomes")
+            words = quoted(t, args.authority, "--authority marking request items as context") if args.action == "context" else None
             for clause in clauses:
                 clause.pop("context", None)
                 if note:
                     clause["context"] = note
             if args.action == "context":
-                operator_decision(t, "coverage.context", ",".join(sorted(args.item)), args.authority or note, prior)
+                operator_decision(t, "coverage.context", ",".join(sorted(args.item)), words, prior)
             print(", ".join(c["id"] for c in clauses) + (" -> " + args.req if args.action == "map" else " marked context"))
     else:
         with edit(args, "coverage.assert") as (_, t):
@@ -689,16 +689,21 @@ def other(args):
         elif args.command == "review-policy":
             prior = {"require_independent_review": t.get("require_independent_review", True)}
             t["require_independent_review"] = args.policy == "independent"
-            operator_decision(t, "review-policy", "review-policy", require_text(args.authority, "--authority"), prior)
+            words = (quoted(t, args.authority, "--authority accepting a self review") if args.policy == "self"
+                     else require_text(args.authority, "--authority"))
+            operator_decision(t, "review-policy", "review-policy", words, prior)
         elif args.command == "state":
             require_text(args.reason, "--reason recording the operator instruction or real interruption")
             if args.status == "ACTIVE" and t["state"] == "CANCELLED" and not args.authority:
                 raise DmdError("reactivation after cancellation requires explicit --authority")
+            # Pausing or cancelling releases the Stop hook, so only the operator's words do it.
+            words = (quoted(t, args.authority, f"--authority to set the task {args.status}")
+                     if args.status != "ACTIVE" and t["state"] != args.status else args.authority or args.reason)
             prior = {"state": t["state"], "state_reason": t.get("state_reason")}
             t["state"] = args.status
             t["state_reason"] = args.reason
             if prior["state"] != args.status:
-                operator_decision(t, "state", args.status, args.authority or args.reason, prior)
+                operator_decision(t, "state", args.status, words, prior)
             if args.status == "ACTIVE":
                 t["watchdogs"] = {}
         elif args.command == "attempt":
@@ -748,6 +753,11 @@ def other(args):
                 unindex_run(r.get("token"))
                 t.setdefault("recovery", []).append({"at": now(), "proof": args.proof, "found": found})
                 print(json.dumps(found, indent=2))
+
+
+def quoted(t, text, what):
+    """The operator's words authorizing a loosening decision on task t (store.operator_quote)."""
+    return operator_quote(text, Path(t["root"]), t.get("created_at") or "", what)
 
 
 def operator_decision(t, op, target, text, prior, binding=None):
@@ -924,16 +934,27 @@ def relocate(args):
 
 
 def configuration(args):
-    """Change hook enforcement; the change applies immediately."""
+    """Change hook enforcement; the change applies immediately. Lowering it (a weaker mode,
+    an earlier no-progress release) needs the operator's words, like any loosening decision."""
     with lock(state_root()):
         data = load_config(strict=False)
         data.pop("pending", None)  # a change parked for confirmation before automatic approval
+        before = {k: data.get(k, DEFAULT_CONFIG[k]) for k in DEFAULT_CONFIG}
         if args.mode:
             data["mode"] = args.mode
         if args.max_no_progress is not None:
             if not 1 <= args.max_no_progress <= 6:
                 raise DmdError("max-no-progress must be 1..6; do not bypass host loop safeguards")
             data["max_no_progress"] = args.max_no_progress
+        rank = {"off": 0, "observe": 1, "enforce": 2}
+        if rank.get(data["mode"], 0) < rank.get(before["mode"], 0) or data.get("max_no_progress", 6) < before["max_no_progress"]:
+            cwd = args.cwd or os.getcwd()
+            try:
+                directory = locate(cwd)
+            except DmdError:
+                directory = None
+            since = (load_task(directory).get("created_at") or "") if directory else ""
+            operator_quote(args.authority, identity(cwd)[0], since, "--authority lowering hook enforcement")
         save_config(data)
     print(json.dumps(data))
 
@@ -987,7 +1008,7 @@ def parser():
     s = command("init", init); s.add_argument("-m", "--message"); s.add_argument("--request-file"); s.add_argument("--authority", required=True); s.add_argument("--session"); s.add_argument("--new", action="store_true"); s.add_argument("--independent-review", action="store_true", help="already the default"); s.add_argument("--from-host", action="store_true")
     s = command("req", req); s.add_argument("action", choices=["add", "cancel", "attest-only", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--id"); s.add_argument("--anchor"); s.add_argument("--covers", action="append", metavar="C-XX"); s.add_argument("--authority"); s.add_argument("--json", action="store_true")
     s = command("work", work); s.add_argument("action", choices=["add", "set", "remove", "list"]); s.add_argument("text", nargs="?"); s.add_argument("--req"); s.add_argument("--id"); s.add_argument("--dep", action="append"); s.add_argument("--owns", action="append"); s.add_argument("--status", choices=sorted(WORK_STATES)); s.add_argument("--note"); s.add_argument("--replace"); s.add_argument("--clear-deps", action="store_true"); s.add_argument("--json", action="store_true")
-    s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"])
+    s = command("check", check); s.add_argument("action", choices=["add", "edit", "set", "baseline", "remove", "list"]); s.add_argument("--authority")
     for flag in ["req", "id", "cmd", "run-cwd", "expect", "match", "red-match", "status", "note", "evidence", "candidate", "approve"]:
         s.add_argument("--" + flag)
     s.add_argument("--method", choices=["command", "manual", "review", "browser"]); s.add_argument("--work", action="append"); s.add_argument("--input", action="append"); s.add_argument("--clear-inputs", action="store_true"); s.add_argument("--clear-exclusive", action="store_true"); s.add_argument("--exclusive", action="append"); s.add_argument("--writes", action="append"); s.add_argument("--clear-writes", action="store_true"); s.add_argument("--timeout", type=float); s.add_argument("--max-output", type=int); s.add_argument("--regression", action="store_true"); s.add_argument("--no-regression", action="store_true"); s.add_argument("--red-exit", type=int); s.add_argument("--attested-because"); s.add_argument("--json", action="store_true")
@@ -1011,7 +1032,7 @@ def parser():
     s = command("map-host-task", other); s.add_argument("--host-id", required=True); s.add_argument("--work", required=True)
     s = command("recover-run", other); s.add_argument("--proof", required=True)
     s = command("authority", authority_command); s.add_argument("action", choices=["list", "confirm", "withdraw"]); s.add_argument("id", nargs="?")
-    s = command("config", configuration); s.add_argument("--mode", choices=["off", "observe", "enforce"]); s.add_argument("--max-no-progress", type=int)
+    s = command("config", configuration); s.add_argument("--mode", choices=["off", "observe", "enforce"]); s.add_argument("--max-no-progress", type=int); s.add_argument("--authority")
     s = command("hook", None); s.add_argument("event", choices=HOOK_EVENTS)
     s = command("list", None); s.add_argument("--json", action="store_true"); s.add_argument("--state", action="append")
     command("doctor", doctor)

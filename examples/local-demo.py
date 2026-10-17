@@ -43,6 +43,11 @@ def main():
                 raise RuntimeError(f'Expected exit {expected}, got {p.returncode}: {p.stderr}')
             return p.stdout
 
+        def say(text):
+            """The operator types a prompt; the UserPromptSubmit hook captures it."""
+            subprocess.run([*dmd, 'hook', 'user-prompt-submit'], capture_output=True, text=True, env=env, timeout=60,
+                           input=json.dumps({'session_id': session, 'cwd': str(project), 'prompt': text}), check=True)
+
         step = raw
         step('init', '-m', 'Deliver VALUE=42 and remediate the discovered incorrect value',
              '--authority', 'Local acceptance fixture explicitly authorizes its temporary project',
@@ -68,8 +73,10 @@ def main():
         step('work', 'set', '--id', 'W-01', '--status', 'verified')
         step('finding', 'set', '--id', 'F-01', '--status', 'fixed-verified', '--work', 'W-01', '--check', 'A-01',
              '--note', 'Actual faulty baseline reproduced; root value repaired and regression verified')
-        step('review-policy', 'self', '--authority',
-                      'Fixture operator accepts a self review for this demonstration')
+        # Loosening the contract needs the operator's own later words, quoted exactly.
+        step('review-policy', 'self', '--authority', 'self review is fine', expected=2)
+        say('A self review is fine for this demonstration')
+        step('review-policy', 'self', '--authority', 'self review is fine')
         step('coverage', 'assert', '--note', 'Reconciled after the review-policy decision')
         step('review', '--kind', 'self', '--reviewer', 'deterministic local fixture', '--note',
              'Final fixture contract and real assertion inspected', '--evidence', str(artifact))
@@ -101,8 +108,9 @@ def main():
         counts = blocked['attestation']
         if (counts['executed'], counts['self_attested']) != (1, 1):
             raise RuntimeError('Acceptance basis was not counted correctly')
+        say('I accept a recorded human observation for the rendered page')
         step('req', 'attest-only', '--id', 'R-02',
-                      '--authority', 'Operator accepts a recorded human observation for this outcome')
+                      '--authority', 'I accept a recorded human observation for the rendered page')
         step('coverage', 'assert', '--note', 'Reconciled after recording attested-only authority')
         step('review', '--kind', 'self', '--reviewer', 'deterministic local fixture',
              '--note', 'Both outcomes reconciled; R-02 rests on a recorded human observation', '--evidence', str(artifact))
@@ -113,7 +121,7 @@ def main():
             if expected not in report:
                 raise RuntimeError(f'Report did not disclose {expected}')
     print('DMD_DEMO_PASS:automatic-logged-approvals;real-red-green-and-stale-rejection;'
-          'attested-only-refused-then-authorized;temporary-fixtures-removed')
+          'unquoted-loosening-refused;attested-only-refused-then-authorized;temporary-fixtures-removed')
     return 0
 
 if __name__ == '__main__':

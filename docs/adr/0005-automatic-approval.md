@@ -1,6 +1,6 @@
 # ADR 0005: Contract decisions are approved automatically
 
-Status: accepted (unreleased, 2026-10-17). Supersedes the confirmation parts of [ADR 0003](0003-operator-decisions.md) and the 0.8.0 operator-confirmed approvals.
+Status: accepted (0.9.0, 2026-10-17). Supersedes the confirmation parts of [ADR 0003](0003-operator-decisions.md) and the 0.8.0 operator-confirmed approvals.
 
 ## Context
 

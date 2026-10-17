@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import socket
 import time
 import uuid
@@ -246,6 +247,49 @@ def capture_prompt(session, cwd, prompt):
         raise DmdError("host prompt exceeds 1 MiB")
     atomic(prompt_path(session, root), json.dumps({"root": str(root), "session": digest(session),
            "text": text, "digest": digest(text), "at": now()}))
+    history = history_path(root)
+    with lock(private_dir(history.parent), ".history.lock"):
+        rows = read_json(history).get("prompts") or [] if history.exists() else []
+        kept = text[:PROMPT_KEEP_CHARS]
+        rows = (rows + [{"text": kept, "digest": digest(kept), "at": now()}])[-PROMPT_HISTORY:]
+        atomic(history, json.dumps({"root": str(root), "prompts": rows}))
+
+
+# The operator's own words in a worktree: every prompt the host captured there (any
+# session), newest last. Bounded: a long-lived worktree keeps the latest prompts only.
+PROMPT_HISTORY = 50
+PROMPT_KEEP_CHARS = 65536
+QUOTE_MIN_CHARS = 4
+
+
+def history_path(root):
+    return state_root() / "prompts" / ("root-" + digest(str(root)) + ".json")
+
+
+def operator_words(root, since=""):
+    """Captured prompts for this worktree root recorded after `since`."""
+    path = history_path(root)
+    if not path.exists():
+        return []
+    data = read_json(path)
+    if data.get("root") != str(root):
+        raise DmdError("operator prompt history is inconsistent")
+    return [p["text"] for p in data.get("prompts") or []
+            if isinstance(p, dict) and digest(p.get("text")) == p.get("digest") and (p.get("at") or "") > since]
+
+
+def operator_quote(text, root, since, what):
+    """A decision that loosens the contract must quote the operator: an exact, word-bounded
+    excerpt of a prompt they typed after the task began. The request itself, an amendment
+    or the agent's own words never qualify, so the agent cannot authorize itself."""
+    quote = require_text(text, what).strip()
+    if len(re.sub(r"\s", "", quote)) >= QUOTE_MIN_CHARS:
+        bounded = re.compile(r"(?<!\w)" + re.escape(quote) + r"(?!\w)")
+        if any(bounded.search(words) for words in operator_words(root, since)):
+            return quote
+    raise DmdError(f"{what} must be an exact quote ({QUOTE_MIN_CHARS}+ characters) of something the operator typed after "
+                   "this task began, as captured by the UserPromptSubmit hook. The original request, an amendment or your own "
+                   "words cannot authorize it: ask the operator in the conversation, then quote their reply")
 
 
 def captured_prompt(session, root):
@@ -306,6 +350,8 @@ def create_task(cwd, task_id, request, authorization, session=None, new=False, r
                     prior = load_task(old)
                     if prior.get("running"):
                         raise DmdError("cannot supersede an assignment while its check is running")
+                    authorization = operator_quote(authorization, root, prior.get("created_at") or "",
+                                                   "--authority to supersede the unfinished assignment")
                     authority.record(t, "init.new", prior["task_id"], authorization,
                                      {"dir": str(old), "state": prior["state"], "state_reason": prior.get("state_reason")})
                     prior["state"] = "PAUSED"
