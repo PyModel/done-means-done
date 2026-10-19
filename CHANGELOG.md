@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Host-agent state does not stale evidence.** Untracked files under `.claude/` (skills a
+  learning hook lands at session end, local settings, agent worktrees) are left out of the
+  fingerprint, the leftovers list and the concurrent-writer scan. A skill landing after a
+  green run used to stale every receipt, so the Stop hook blocked again each session.
+  Tracked `.claude/` files and declared `--input`s are still hashed. Repos that already have
+  untracked `.claude/` files see their receipts go stale once. ADR 0007.
+
 ## 0.9.0 — automatic approval, operator-worded loosening
 
 - **Loosening needs the operator's words.** `req cancel`, `req attest-only`, `finding defer`,

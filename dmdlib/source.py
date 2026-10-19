@@ -1,4 +1,5 @@
-"""Content fingerprints include dirty and non-ignored untracked files; never execute repo code."""
+"""Content fingerprints include dirty and non-ignored untracked files (untracked host-agent
+state excepted); never execute repo code."""
 from __future__ import annotations
 import fnmatch
 import hashlib
@@ -23,6 +24,14 @@ class _Tee:
     def update(self, data):
         self.tree.update(data)
         self.own.update(data)
+
+# Untracked host-agent state (skills a learning hook lands mid-session, local settings,
+# agent worktrees) is not the candidate. Hashing it staled every receipt each time the host
+# wrote there. Tracked files under it and declared --input files are still hashed.
+HOST_STATE = ".claude"
+
+def host_state(rel):
+    return HOST_STATE in rel.split("/")[:-1]
 
 def git(root, *args):
     try:
@@ -135,7 +144,7 @@ def output_match(rel, globs):
 
 def untracked(root):
     """Untracked, non-ignored paths of a Git checkout; None outside Git."""
-    raw = git(root, "ls-files", "-z", "-o", "--exclude-standard")
+    raw = git(root, "ls-files", "-z", "-o", "--exclude-standard", f"--exclude={HOST_STATE}/")
     return None if raw is None else {os.fsdecode(p) for p in raw.split(b"\0") if p}
 
 def fingerprint(root, inputs=(), depth=0):
@@ -158,14 +167,14 @@ def snapshot(root, inputs=(), depth=0, exclude=()):
     digests = {}
     head_raw = git(root, "rev-parse", "HEAD")
     h.update((head_raw or b"no-head") + b"\0")
-    listing = git(root, "ls-files", "-z", "-c", "-o", "--exclude-standard")
+    listing = git(root, "ls-files", "-z", "-c", "-o", "--exclude-standard", f"--exclude={HOST_STATE}/")
     if listing is None:
         # A .git entry with failed discovery is not a trustworthy non-Git fallback.
         if (root / ".git").exists():
             raise DmdError("Git metadata exists but Git source discovery failed")
         files = []
         for current, dirs, names in os.walk(root, followlinks=False):
-            dirs[:] = sorted(d for d in dirs if d != ".git")
+            dirs[:] = sorted(d for d in dirs if d not in (".git", HOST_STATE))
             for d in list(dirs):
                 p = Path(current) / d
                 if p.is_symlink():
@@ -263,7 +272,7 @@ def recent_writes(root, window, exclude=()):
         code, rel = entry[:2], os.fsdecode(entry[3:])
         if code[:1] in (b"R", b"C"):
             i += 1  # the rename source follows as its own field
-        if code == b"??" and exclude and output_match(rel, exclude):
+        if code == b"??" and (host_state(rel) or exclude and output_match(rel, exclude)):
             continue
         try:
             age = now - (Path(root) / rel).lstat().st_mtime

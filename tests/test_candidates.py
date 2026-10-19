@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 from dmdlib.cli import locate, load_task
 from dmdlib.model import source_digest, task_fingerprint, source_for
-from dmdlib.source import snapshot, drift, recent_writes, candidate_root
+from dmdlib.source import snapshot, drift, recent_writes, candidate_root, untracked
 from test_runtime import DmdFixture
 
 QUIET = ("--quiet-window", "0")
@@ -570,3 +570,31 @@ class DeclaredOutputsCase(GitFixture):
         before = task_fingerprint(load_task(locate(self.repo)))
         self.add_check(self.repo)
         self.assertEqual(task_fingerprint(load_task(locate(self.repo))), before)
+
+
+class HostStateCase(GitFixture):
+    """Untracked host-agent state (.claude/) is not the candidate: a learning hook landing a
+    skill after the receipt must not stale it, or every Stop hook loops."""
+    def land_skill(self):
+        skill = self.repo / ".claude" / "skills" / "learned"; skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("learned\n"); (skill / ".ledger.jsonl").write_text("{}\n")
+
+    def test_green_survives_a_host_skill_landing(self):
+        self.git("init", "-q"); self.git("add", "."); self.git("commit", "-q", "-m", "base")
+        self.setup_task(); self.cmd("run", "A-01", *QUIET)
+        self.land_skill(); self.git("worktree", "add", "-q", str(self.repo / ".claude" / "worktrees" / "w"))
+        out, _ = self.cmd("status", "--json")
+        self.assertEqual(json.loads(out)["gate"]["summary"]["checks"]["accepted"], ["A-01"], out)
+        self.assertEqual(recent_writes(self.repo, 60), []); self.assertEqual(untracked(self.repo), set())
+
+    def test_tracked_host_state_and_declared_inputs_still_count(self):
+        (self.repo / ".claude").mkdir(); (self.repo / ".claude" / "settings.json").write_text("{}\n")
+        self.git("init", "-q"); self.git("add", "."); self.git("commit", "-q", "-m", "base")
+        verifier = self.repo / ".claude" / "verify.sh"; verifier.write_text("true\n")
+        base = snapshot(self.repo, [str(verifier)])["fingerprint"]
+        verifier.write_text("false\n")
+        self.assertNotEqual(snapshot(self.repo, [str(verifier)])["fingerprint"], base)
+        before = snapshot(self.repo)["fingerprint"]
+        (self.repo / ".claude" / "settings.json").write_text('{"x": 1}\n')
+        self.assertNotEqual(snapshot(self.repo)["fingerprint"], before)
+        self.assertEqual([w["path"] for w in recent_writes(self.repo, 60)], [".claude/settings.json"])
