@@ -598,3 +598,10 @@ class HostStateCase(GitFixture):
         (self.repo / ".claude" / "settings.json").write_text('{"x": 1}\n')
         self.assertNotEqual(snapshot(self.repo)["fingerprint"], before)
         self.assertEqual([w["path"] for w in recent_writes(self.repo, 60)], [".claude/settings.json"])
+
+    def test_host_state_outside_git_is_not_the_candidate(self):
+        before = snapshot(self.repo)["fingerprint"]
+        self.land_skill()
+        self.assertEqual(snapshot(self.repo)["fingerprint"], before)
+        (self.repo / "subject.py").write_text("VALUE = 1\n")
+        self.assertNotEqual(snapshot(self.repo)["fingerprint"], before)
