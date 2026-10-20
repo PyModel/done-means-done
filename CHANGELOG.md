@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 — 2026-10-20
 
 - **A live run is waited on, not rerun.** While `dmd run` was executing, the Stop hook said
   "wait for it, do not start a second one" and in the same line `Rerun: dmd run A-01 …`, with

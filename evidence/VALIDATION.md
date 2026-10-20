@@ -1,22 +1,22 @@
 # Validation report
 
-Release: **Done Means Done 0.9.0**, prepared October 17, 2026 (this header names the current release; the sections below are cumulative). The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
+Release: **Done Means Done 0.9.1**, prepared October 20, 2026 (this header names the current release; the sections below are cumulative). The source repository was inspected at `bd9139c43a2afb370e8d78d00e3f9c84f55d8cc2`. This is the consolidated local package, not a claim that this revision was pushed to GitHub.
 
 ## Executed verification
 
 | Check | Actual result | Evidence |
 |---|---|---|
-| `python3 -B tests/run.py` | **385 tests passed; 0 failures; 0 skipped** (macOS Python 3.14.7), including `test_anticheat.py` (37 cases): automatic, logged and withdrawable decisions; verifier binding (a changed verifier needs a new approval); legacy unconfirmed decisions; a stale PreToolUse registration that never asks; and the 0.9.0 operator-words rule (own words, the request, an amendment, a pre-task prompt, another worktree's prompt, partial words and tiny quotes are all refused; quoted later prompts authorize; pause/config/attest-only/context/self-review/defer/supersede covered; history bounded at 50; a quote is spent once; a loosening withdrawal needs its own quote; an agent amendment never spends an operator quote; a config.json without a mode key is still checked; host-injected turns are never captured or quotable). A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
+| `python3 -B tests/run.py` | **390 tests passed; 0 failures; 0 skipped** (macOS Python 3.15.0), including `test_anticheat.py` (37 cases): automatic, logged and withdrawable decisions; verifier binding (a changed verifier needs a new approval); legacy unconfirmed decisions; a stale PreToolUse registration that never asks; and the 0.9.0 operator-words rule (own words, the request, an amendment, a pre-task prompt, another worktree's prompt, partial words and tiny quotes are all refused; quoted later prompts authorize; pause/config/attest-only/context/self-review/defer/supersede covered; history bounded at 50; a quote is spent once; a loosening withdrawal needs its own quote; an agent amendment never spends an operator quote; a config.json without a mode key is still checked; host-injected turns are never captured or quotable), plus the 0.9.1 live-run Stop cases in `test_completion.StopGovernance` (a live run is waited on and never named for a rerun; a stranded run is named for `recover-run` and counts toward the release). A nonempty clean run is required for its success marker. | [Final test transcript](tests-final.log) |
 | `python3 -B examples/local-demo.py` | Actual subprocess CLI workflow: an unapproved verifier is refused, then approved automatically; intentional red baseline; root-cause repair; green verification; finding closure; an unquoted self-review policy refused, then accepted quoting a captured operator prompt; final review/gate/report; same-size preserved-mtime source mutation rejected; final repair/reverification; a solely attested requirement refused, then completed quoting the operator; temporary fixtures removed. | [Local demonstration transcript](local-demo.log) |
 | `python3 -B tests/validate_package.py` | Python syntax parsed using the Python 3.10 grammar; required files, release identity, local Markdown links, code fences, skill size, real files/no symlinks and no bytecode-cache artifacts checked. | [Static package transcript](package-validation.log) |
 | YAML frontmatter parsed with PyYAML 6.0.3 (Docker `python:3.10`) | Correct single skill name, standard fields and version. PyYAML is not a runtime dependency. | [Metadata result](frontmatter-validation.log) |
-| `python3 -B bin/dmd --version` and subcommand help | Version 0.9.0; all 33 subcommands accept their help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
+| `python3 -B bin/dmd --version` and subcommand help | Version 0.9.1; all 33 subcommands accept their help request. No acceptance command or hook installation executed by help checks. | [CLI surface transcript](cli-help-validation.log) |
 | Live Claude Code host (2.1.280, model haiku, isolated settings) | 7/7 scenarios pass: SessionStart context reaches the model; enforce-mode Stop blocks and the agent follows `dmd next`; the watchdog releases; observe mode never blocks; an operator decision is denied without a prompt channel, recorded as confirmed once approved through a permission-prompt tool, and still caught in a `python -c` argv-list form. Total cost $0.17. | [Live host transcript](live-host.log) |
 | SHA-256 manifest | Every tracked file's checksum listed and verified with `shasum -a 256 -c SHA256SUMS`; no symlinks or bytecode caches. No archive was built for 0.7.0. | `SHA256SUMS` |
 
 The unit suite includes **synthetic predicate fixtures** and **actual CLI/filesystem/process/hook-contract/installer/migration tests**. Synthetic records test the acceptance predicate, not independent truth of software behavior. Hook payload fixtures test documented control responses; the live host run above exercises them in a real session.
 
-All installer tests used isolated temporary settings/state. Pre-fix failure transcripts (`adoption-before-fix.log`, `resume-before-fix.log`) are 0.3.0 artifacts, intentionally retained as regression evidence and explained in [remediations](REMEDIATIONS.md); they are not current failures. The transcripts in the table above were regenerated on macOS for 0.9.0, except the live-host row, which is the recorded 0.7.x run: it exercised an operator-confirmation prompt that 0.9.0 removed. The 0.9.0 hook surface (UserPromptSubmit capture and history, no PreToolUse) is exercised by local hook-contract tests, not a new live host run.
+All installer tests used isolated temporary settings/state. Pre-fix failure transcripts (`adoption-before-fix.log`, `resume-before-fix.log`) are 0.3.0 artifacts, intentionally retained as regression evidence and explained in [remediations](REMEDIATIONS.md); they are not current failures. The transcripts in the table above were regenerated on macOS for 0.9.1, except the live-host row, which is the recorded 0.7.x run: it exercised an operator-confirmation prompt that 0.9.0 removed. The 0.9.0 hook surface (UserPromptSubmit capture and history, no PreToolUse) is exercised by local hook-contract tests, not a new live host run.
 
 ## 0.4.0 defect-review verification
 
@@ -146,6 +146,12 @@ Trigger: cleaning the state root of this machine found 39 empty record directori
 | Full suite, macOS Python 3.14.7; Linux Docker `python:3.10` | `DMD_TESTS_PASS:341;skipped=0`, [transcript](tests-final.log) |
 
 Run on macOS (Darwin 27.0.0, Apple Silicon, Python 3.14.7).
+
+## 0.9.1 verification
+
+- Live-run Stop message (`test_completion.StopGovernance`, 2 new cases): both failed on 0.9.0 with the reported message (`wait for it, do not start a second one` next to `Rerun: dmd run A-01`) and pass now. Mutation table, each hunk reverted alone: in-run checks kept in the summary rerun group → red; `next` A- skip removed → red; `next` W- skip removed → red; hook liveness test removed (a dead runner resets the no-progress count) → red; stranded branch of the `running` action removed → red; in-run reason text reverted → red. Each mutation was restored and the suite rerun green.
+- Host state (ADR 0007): untracked `.claude/` writes keep receipts fresh in the Git-listed and the non-Git walk; tracked `.claude/` and declared `--input` edits still stale them (`test_candidates`).
+- `pyflakes` is clean over `dmdlib/` and `tests/`.
 
 ## 0.9.0 verification
 

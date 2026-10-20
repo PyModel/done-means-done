@@ -1,5 +1,5 @@
 $ dmd --version
-0.9.0
+0.9.1
 $ dmd --help
 usage: dmd [-h] [--version] [--cwd CWD] [--task TASK] COMMAND ...
 

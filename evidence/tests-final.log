@@ -84,6 +84,9 @@ test_a_held_resource_mid_batch_keeps_earlier_results (test_candidates.ExclusiveC
 test_exclusive_tag_is_recorded_and_in_the_definition (test_candidates.ExclusiveCase.test_exclusive_tag_is_recorded_and_in_the_definition) ... ok
 test_held_resource_blocks_the_run_with_a_bounded_wait (test_candidates.ExclusiveCase.test_held_resource_blocks_the_run_with_a_bounded_wait) ... ok
 test_invalid_tag_is_refused (test_candidates.ExclusiveCase.test_invalid_tag_is_refused) ... ok
+test_green_survives_a_host_skill_landing (test_candidates.HostStateCase.test_green_survives_a_host_skill_landing) ... ok
+test_host_state_outside_git_is_not_the_candidate (test_candidates.HostStateCase.test_host_state_outside_git_is_not_the_candidate) ... ok
+test_tracked_host_state_and_declared_inputs_still_count (test_candidates.HostStateCase.test_tracked_host_state_and_declared_inputs_still_count) ... ok
 test_group_lists (test_candidates.ListingCase.test_group_lists) ... ok
 test_listing_does_not_mutate_or_execute (test_candidates.ListingCase.test_listing_does_not_mutate_or_execute) ... ok
 test_status_only_renders_the_requested_sections (test_candidates.ListingCase.test_status_only_renders_the_requested_sections) ... ok
@@ -151,6 +154,8 @@ test_supervisor_exits_cleanly_when_orphaned (test_completion.RunnerSurvivesItsPa
 test_supervisor_holds_when_the_parent_stopped_listening (test_completion.RunnerSurvivesItsParent.test_supervisor_holds_when_the_parent_stopped_listening)
 The parent closes the status pipe on an interrupt or output-limit break; the ... ok
 test_a_live_run_is_not_a_no_progress_loop (test_completion.StopGovernance.test_a_live_run_is_not_a_no_progress_loop) ... ok
+test_a_live_run_never_tells_the_agent_to_rerun_its_checks (test_completion.StopGovernance.test_a_live_run_never_tells_the_agent_to_rerun_its_checks) ... ok
+test_a_stranded_run_says_recover_and_still_counts_toward_release (test_completion.StopGovernance.test_a_stranded_run_says_recover_and_still_counts_toward_release) ... ok
 test_accepted_evidence_is_progress (test_completion.StopGovernance.test_accepted_evidence_is_progress) ... ok
 test_adding_records_is_not_progress (test_completion.StopGovernance.test_adding_records_is_not_progress) ... ok
 test_cd_into_a_subdirectory_keeps_the_task_governing (test_completion.StopGovernance.test_cd_into_a_subdirectory_keeps_the_task_governing) ... ok
@@ -387,7 +392,7 @@ test_watchdog_releases_the_stop_but_never_the_obligations (test_runtime.RuntimeC
 test_zero_timeout_refused (test_runtime.RuntimeCase.test_zero_timeout_refused) ... ok
 
 ----------------------------------------------------------------------
-Ran 385 tests in 100.200s
+Ran 390 tests in 111.959s
 
 OK
-DMD_TESTS_PASS:385;skipped=0
+DMD_TESTS_PASS:390;skipped=0
