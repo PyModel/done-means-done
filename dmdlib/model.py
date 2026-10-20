@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections import deque
 from pathlib import Path
-from .storage import DmdError, digest, evidence_ok
+from .storage import DmdError, digest, evidence_ok, pid_alive
 from .source import file_digest, snapshot, MissingCandidate
 from .authority import decision_ok, unconfirmed
 
@@ -407,6 +407,12 @@ class Assessment:
             self.work_ok(w["id"])
         self.findings = self._findings()
         self.blocked = self._blocked_items()
+        # Checks of the recorded run get their result when it finishes; `dmd run` refuses
+        # them meanwhile, so no view may tell the agent to run them. A runner known to be
+        # gone is stranded, not in progress (another host's runner cannot be checked here).
+        running = t.get("running") or {}
+        self.inflight = set(running.get("checks") or [running.get("check")]) - {None}
+        self.runner_alive = pid_alive(running.get("pid"), running.get("host")) if running else None
         self.reasons = []  # (owner, text); owner "review" is appended last
         self._collect()
 
@@ -574,7 +580,7 @@ class Assessment:
             for c in cs:
                 code, reason = self.verdicts[c["id"]]
                 if reason:
-                    self._add(c["id"], f"{c['id']}: {reason}")
+                    self._add(c["id"], f"{c['id']}: " + ("in the recorded verification run" if c["id"] in self.inflight else reason))
                 if c.get("regression") and not self.red.get(c["id"]):
                     self._add(c["id"], f"{c['id']}: meaningful baseline evidence missing")
         for fid, reason in self.findings.items():
@@ -647,7 +653,14 @@ class Assessment:
             elif owner == "task":
                 action = "record each requested outcome: dmd req add '<outcome>' --anchor '<quote from the request>'"
             elif owner == "running":
-                action = "inspect the interrupted run's effects, then dmd recover-run --proof '<what you verified>'"
+                recover = "inspect the interrupted run's effects, then dmd recover-run --proof '<what you verified>'"
+                ids = " ".join(sorted(self.inflight))
+                if self.runner_alive is False:
+                    action = f"the run of {ids} is stranded (its runner is gone): {recover}"
+                elif self.runner_alive:
+                    action = f"wait for the run of {ids} to finish (dmd status shows its result); do not start another"
+                else:
+                    action = f"wait for the run of {ids} to finish; if its runner is gone, {recover}"
             elif owner.startswith("AU-"):
                 action = f"recorded before automatic approval: dmd authority confirm {owner}, or undo it: dmd authority withdraw {owner}"
             elif owner.startswith("U-"):
@@ -666,6 +679,9 @@ class Assessment:
                 if any(not self.work_ok(d) for d in w["deps"]):
                     continue  # not dependency-ready; its prerequisite carries the action
                 owed = self.work_owed(owner)
+                if owed and set(owed) <= self.inflight:
+                    continue  # the recorded run carries it
+                owed = [c for c in owed if c not in self.inflight]
                 if owed and w["status"] == "verified":
                     action = f"rerun stale evidence: dmd run {' '.join(owed)}"
                 elif owed:
@@ -674,6 +690,8 @@ class Assessment:
                     action = (f"map a check: dmd check add --req {w['req']} --work {owner} ..., "
                               f"or dmd work remove --id {owner} --note '<why it is superseded>'")
             elif owner.startswith("A-"):
+                if owner in self.inflight:
+                    continue  # the recorded run carries it
                 c = get(t["checks"], owner)
                 if self.verdicts[owner][0] is not None and any(w in actionable_owners for w in c["work"]):
                     continue  # the mapped work item already names this check
@@ -727,10 +745,13 @@ class Assessment:
         """The reasons grouped by typed cause, so twenty-five stale lines read as one fact
         and the reader gets the command that discharges it."""
         t = self.t
-        groups = {"accepted": [], "stale": [], "failed": [], "not_run": [], "edited": [], "legacy": [], "missing_inputs": [], "other": []}
+        groups = {"accepted": [], "stale": [], "failed": [], "not_run": [], "edited": [], "legacy": [], "missing_inputs": [], "other": [],
+                  "running": []}
         for c in live(t["checks"]):
             code = self.verdicts[c["id"]][0]
-            if code is None:
+            if c["id"] in self.inflight and code is not None:
+                groups["running"].append(c["id"])
+            elif code is None:
                 groups["legacy" if legacy_receipt(c) else "accepted"].append(c["id"])
             else:
                 groups[code].append(c["id"])
@@ -748,7 +769,7 @@ class Assessment:
         uncovered = [rid for rid in self.active if not any(c["req"] == rid for c in live(t["checks"]))]
         if uncovered:
             parts.append(f"{len(uncovered)} requirement(s) without a check")
-        for key, label in (("stale", "stale"), ("failed", "failed"), ("not_run", "not run"), ("edited", "edited, need approval"),
+        for key, label in (("running", "in the recorded run"), ("stale", "stale"), ("failed", "failed"), ("not_run", "not run"), ("edited", "edited, need approval"),
                            ("missing_inputs", "declare a missing input"), ("other", "lack evidence")):
             if groups[key]:
                 parts.append(f"{len(groups[key])} check(s) {label}")

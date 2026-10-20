@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A live run is waited on, not rerun.** While `dmd run` was executing, the Stop hook said
+  "wait for it, do not start a second one" and in the same line `Rerun: dmd run A-01 …`, with
+  `dmd next` naming the same checks, which `dmd run` then refused. Checks in the recorded run
+  now leave the rerun line and `next`; the `running` item says to wait. A run whose runner
+  PID is gone is reported as stranded with `recover-run`, and its Stops count toward the
+  no-progress release again instead of blocking forever.
 - **Host-agent state does not stale evidence.** Untracked files under `.claude/` (skills a
   learning hook lands at session end, local settings, agent worktrees) are left out of the
   fingerprint, the leftovers list and the concurrent-writer scan. A skill landing after a

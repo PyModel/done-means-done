@@ -267,7 +267,9 @@ def _handle(args):
         old = watches.get(key, {})
         gained = not isinstance(old.get("done"), list) or bool(set(progress) - set(old["done"]))
         # A live verification run is progress in flight: stopping to wait on it is not a loop.
-        count = 1 if gained or task.get("running") else old.get("count", 0) + 1
+        # A runner known to be gone is not; that stop counts toward the release.
+        in_flight = bool(task.get("running")) and a.runner_alive is not False
+        count = 1 if gained or in_flight else old.get("count", 0) + 1
         watches[key] = {"done": progress, "count": count, "at": now()}
         released = task.get("released") or {}
         if released and set(progress) - set(released.get("done") or []):
@@ -296,7 +298,10 @@ def _handle(args):
         save(directory, task, "hook.stop.block", count=count, continuation=payload.get("stop_hook_active") is True)
         next_ids = ", ".join(safe_text(x["id"], 96) for x in g["next"][:5]) or "coverage, evidence, or final review"
         running = ""
-        if task.get("running"):
-            running = f"A verification run is in progress ({', '.join(task['running'].get('checks') or [])}); wait for it, do not start a second one. "
+        if in_flight:
+            running = f"A verification run is in progress ({', '.join(sorted(a.inflight))}); wait for it, do not start a second one. "
+        elif task.get("running"):
+            running = (f"The recorded run of {', '.join(sorted(a.inflight))} is stranded: its runner pid {task['running'].get('pid')} is gone; "
+                       "inspect its effects, then dmd recover-run --proof '<what you verified>'. ")
         print(json.dumps({"decision": "block", "reason": "Done Means Done: authorized work remains. " + ((notice + " ") if notice else "") + running + outstanding(g) + ". Run dmd next and continue executable work. Next IDs: " + next_ids + ". A checkpoint is not task completion. Respect permissions and cancellation."}))
         return 0

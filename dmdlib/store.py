@@ -5,12 +5,11 @@ import contextlib
 import json
 import os
 import re
-import socket
 import time
 import uuid
 from pathlib import Path
 from . import __version__
-from .storage import DmdError, atomic, digest, ident, lock, now, private_dir, read_json, redact, save
+from .storage import DmdError, atomic, digest, ident, lock, now, pid_alive, private_dir, read_json, redact, save
 from .source import git_root, identity
 from .model import FINISHED, SCHEMA, contract_digest, extract_clauses, validation_errors
 from . import authority
@@ -384,18 +383,6 @@ def withdraw_supersede(directory, t, entry):
 
 
 # Verification runs on this machine ---------------------------------------------------
-
-def pid_alive(pid, host):
-    """True/False for a PID on this host; None when it belongs to another host."""
-    if host != socket.gethostname() or not isinstance(pid, int):
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 def runs_dir():
     directory = private_dir(state_root() / "runs")

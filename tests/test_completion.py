@@ -121,6 +121,37 @@ class StopGovernance(test_runtime.DmdFixture):
         for _ in range(3):
             out = self.stop(); self.assertEqual(out.get("decision"), "block"); self.assertIn("in progress", out["reason"])
 
+    def mark_running(self, pid):
+        import socket
+        from dmdlib.storage import save
+        # A-02 maps to no work item, so only its own skip keeps it out of `next`.
+        self.cmd("check", "add", "--req", "R-01", "--cmd", "python3 -B verify.py", "--expect", "same", "--match", "ACCEPTANCE_PASS:1")
+        d = locate(self.repo); t = load_task(d)
+        t["running"] = {"token": "x", "checks": ["A-01", "A-02"], "check": "A-01", "pid": pid, "host": socket.gethostname()}
+        save(d, t, "test.running")
+
+    def test_a_live_run_never_tells_the_agent_to_rerun_its_checks(self):
+        # The incident: "wait for it, do not start a second one" next to "Rerun: dmd run A-01 ..."
+        # and Next IDs naming the very checks the run was executing.
+        import os
+        self.setup_task(); self.enforce(); self.mark_running(os.getpid())
+        reason = self.stop()["reason"]
+        self.assertIn("wait for it", reason)
+        self.assertNotIn("dmd run A-01", reason)
+        self.assertNotIn("A-01: not run", reason)
+        self.assertNotIn("A-0", reason.split("Next IDs: ")[1])
+        out, _ = self.cmd("next")
+        self.assertNotIn("dmd run A-0", out); self.assertIn("do not start another", out)
+
+    def test_a_stranded_run_says_recover_and_still_counts_toward_release(self):
+        import subprocess, sys
+        dead = subprocess.Popen([sys.executable, "-c", "pass"]); dead.wait()
+        self.setup_task(); self.enforce("1"); self.mark_running(dead.pid)
+        reason = self.stop()["reason"]
+        self.assertIn("recover-run", reason); self.assertNotIn("wait for it", reason)
+        self.assertIn("is stranded (its runner is gone)", self.cmd("next")[0])
+        self.assertNotIn("decision", self.stop(), "a dead runner is not progress in flight")
+
 
 class RunnerSurvivesItsParent(test_runtime.DmdFixture):
     """A killed `dmd run` must not leave its check executing unsupervised."""

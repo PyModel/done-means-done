@@ -7,6 +7,7 @@ import json
 import os
 import random
 import re
+import socket
 import stat
 import tempfile
 import time
@@ -204,3 +205,16 @@ def evidence_ok(task_dir, record):
         return hashlib.sha256(path.read_bytes()).hexdigest() == record.get("sha256")
     except (OSError, DmdError):
         return False
+
+
+def pid_alive(pid, host):
+    """True/False for a PID on this host; None when it belongs to another host."""
+    if host != socket.gethostname() or not isinstance(pid, int):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
